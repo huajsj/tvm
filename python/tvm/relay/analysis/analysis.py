@@ -27,6 +27,11 @@ from tvm.runtime.ndarray import cpu
 from . import _ffi_api
 from .feature import Feature
 
+def pipeline_graph(mod, pipeLine):
+    """
+    """
+    ret_mod = _ffi_api.PipelineGraph(pipeLine)(mod)
+    return ret_mod
 
 def context_analysis(mod, default_context):
     """Analyze the device context information of each IR node in a Relay
