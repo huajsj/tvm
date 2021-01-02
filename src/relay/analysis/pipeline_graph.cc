@@ -31,45 +31,101 @@ using namespace std;
 namespace tvm {
 namespace relay {
 
+class UseVarVisitor : public ExprVisitor {
+ public:
+  explicit UseVarVisitor(const Var& v) : v(v) {}
+
+  static bool UseVar(const Var& v, const Expr& e) {
+    UseVarVisitor uv(v);
+    uv(e);
+    return uv.use_var;
+  }
+
+ private:
+  bool use_var = false;
+  Var v;
+
+  void VisitExpr_(const VarNode* vn) override { use_var = use_var || (v == GetRef<Var>(vn)); }
+};
+class GNF2 : public ExprMutator {
+ private:
+  std::unordered_map<Var, Expr, ObjectPtrHash, ObjectPtrEqual> var_map_;
+  Expr VisitExpr_(const VarNode* vn) override {
+    Var v = GetRef<Var>(vn);
+    return var_map_.count(v) == 0 ? v : var_map_.at(v);
+  }
+
+  static bool UseVar(const Var& v, const Expr& e) { return UseVarVisitor::UseVar(v, e); }
+
+  static Expr WrapRec(const Var& var, const Expr& val) {
+    return UseVar(var, val) ? Let(var, val, var) : val;
+  }
+
+  Expr VisitExpr_(const LetNode* ln) override {
+    var_map_.insert(std::pair<Var, Expr>(ln->var, WrapRec(ln->var, VisitExpr(ln->value))));
+    return VisitExpr(ln->body);
+  }
+};
+
 class PipelineGraphWrapper : private ExprVisitor {
  public:
   explicit PipelineGraphWrapper(const IRModule& mod) : mod_(mod) {}
 
-  Expr Recursion(Expr anf) {
-      if (anf.as<FunctionNode>()){
-          auto a = anf.as<FunctionNode>();
-          Recursion(a->body);
-          //func = relay::Function(relay::FreeVars(expr), expr, Type(),\
-             relay::FreeTypeVars(expr, mod), {})
-          std::cout << " function " <<std::endl;
+  Expr Recursion(Expr anf, Array<Integer>& indxList) {
+      auto func = anf.as<FunctionNode>();
+      if (func){
+          //int ind = indx;
+          auto ret = relay::Function(func->params,
+                                 Recursion(func->body, indxList),
+                                 func->ret_type,
+                                 func->type_params,
+                                 func->attrs);
+          //std::cout << " function " <<ind <<std::endl;
+          return ret;
       }
       auto let = anf.as<LetNode>();
       if (let){
+          //std::cout << " let " <<std::endl;
           auto call = let->value.as<CallNode>();
           if (call) {
               if (call->op.as<OpNode>()) {
-                std::cout << " call " <<std::endl;
-                auto op_node = call->op.as<OpNode>();
-                std::cout << "op_node2    ---   " 
-                    << op_node->name 
-                    << " index is "
-                    << indx
-                    << " " 
-                    << std::endl;
+                if (!indxList.empty()&& (indx == (int64_t)indxList[0])) {
+                    indxList.erase(indxList.begin());
+                    auto ann = Recursion(let->body, indxList);
+
+                    std::cout << " call " <<std::endl;
+                    auto op_node = call->op.as<OpNode>();
+                    std::cout << "op_node2    ---   " 
+                        << op_node->name 
+                        << " index is "
+                        << indx
+                        << " " 
+                        << std::endl;
+                    //Let(Var var, Expr value, Expr body, Span span = Span());
+
+                    return relay::Let(let->var,
+                                      let->value,
+                                      let->var);
+                }
                 indx ++;
               }
 
           }
-          Recursion(let->body);
-          std::cout << " let " <<std::endl;
+          //std::cout << "cout indx is " << indx <<std::endl;
+          return relay::Let(let->var, let->value,Recursion(let->body, indxList));
       }
       std::cout << "Recursion " << std::endl;
       return anf;
   }
 
-  IRModule Extract() {
+  IRModule Extract(Array<Integer> indxList) {
     //VisitExpr(this->mod_->Lookup("main"));
-    Recursion(this->mod_->Lookup("main"));
+    auto anf = Recursion(this->mod_->Lookup("main"), indxList);
+    auto func = anf.as<FunctionNode>();
+    //auto mod = tvm::IRModule::FromExpr(anf.);
+    //anf = transform::ToANormalForm(anf);
+    anf = GNF2()(func->body);
+    return tvm::IRModule::FromExpr(anf);
       /*
 
     auto functions = Map<GlobalVar, BaseFunc>();
@@ -84,7 +140,7 @@ _operator_idx_inc    }
 
  private:
   const IRModule mod_;
-  int   indx = 0;
+  unsigned int   indx = 0;
   /*
   // This is not simply Map<GlobalVar, Function> because GlobalVar doesn't
   // have the desired equals property
@@ -124,14 +180,14 @@ namespace transform {
 Pass PipelineGraph(const Array<Integer>& indxList) {
   runtime::TypedPackedFunc<IRModule(IRModule, PassContext)> pass_func =
       [=](IRModule m, PassContext pc) {
-		return PipelineGraphWrapper(m).Extract(); 
+		return PipelineGraphWrapper(m).Extract(indxList); 
       };
   auto pipeline_graph_pass = CreateModulePass(pass_func, 1, "PipelineGraph", {});
   std::cout << "pLevel is " << indxList[0] << std::endl;
   return Sequential({SimplifyInference(),
                      ToANormalForm(),
-                     pipeline_graph_pass,
-                     ToGraphNormalForm()},
+                     pipeline_graph_pass},//,
+                    //ToGraphNormalForm()},
                     "PipelineGraph");
 }
 
