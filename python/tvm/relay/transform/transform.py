@@ -696,60 +696,6 @@ def LambdaLift():
     """
     return _ffi_api.LambdaLift()
 
-def PipelineGraph(func, pIndexs):
-    def run_opt_pass(expr, opt_pass):
-        """Exectue a relay pass."""
-        assert isinstance(opt_pass, tvm.transform.Pass)
-        mod = tvm.IRModule.from_expr(expr)
-        mod = opt_pass(mod)
-        entry = mod["main"]
-        return entry if isinstance(expr, relay.Function) else entry.body
-
-    def _operator_idx_inc(expr, operator_current_idx):
-        """Increase operator index
-        """
-        if not isinstance(expr, relay.expr.Constant):
-            operator_current_idx = operator_current_idx + 1
-
-        return operator_current_idx
-
-    def _recursion(anf, operator_indx, pipeLineMods, pIndexs):
-        if isinstance(anf, relay.Function):
-            return relay.Function(anf.params,
-                                  _recursion(anf.body, operator_indx, pipeLineMods, pIndexs),
-                                  anf.ret_type, anf.type_params, anf.attrs)
-        if isinstance(anf, relay.expr.Let):
-            value = anf.value
-            operator_indx = _operator_idx_inc(value, operator_indx)
-            if isinstance(value, relay.expr.Call):
-                if isinstance(value.op, tvm.ir.Op):
-                    print("{} indx is {} pIndexs {}"
-			  .format(operator_indx ,value.op.name, pIndexs))
-                    if (len(pIndexs) and operator_indx == pIndexs[0]):
-                        pIndexs.pop(0)
-                        ann = _recursion(anf.body, operator_indx, pipeLineMods, pIndexs)
-                        print(ann)
-                        ann = run_opt_pass(ann, ToGraphNormalForm())
-                        mod = tvm.IRModule.from_expr(ann)
-                        pipeLineMods.insert(0, mod)
-                        return relay.expr.Let(anf.var, value, anf.var)
-            return relay.expr.Let(anf.var,
-				  value,
-				  _recursion(anf.body, operator_indx, pipeLineMods, pIndexs))
-        else:
-            return anf
-
-    anf = run_opt_pass(func, SimplifyInference())
-    anf = run_opt_pass(func, ToANormalForm())
-    print(anf.body)
-    pipeLineMods = []
-    operator_indx = 0
-    ann = _recursion(anf, operator_indx, pipeLineMods, pIndexs)
-    print(ann.body)
-    ann = run_opt_pass(ann.body, ToGraphNormalForm())
-    mod = tvm.IRModule.from_expr(ann)
-    pipeLineMods.insert(0, mod)
-    return pipeLineMods
 
 def PartitionGraph():
     """Partition a Relay program into regions that can be executed on different
