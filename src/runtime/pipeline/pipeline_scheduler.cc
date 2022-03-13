@@ -33,6 +33,7 @@ std::shared_ptr<GlobalRuntime> PipelineScheduler::PipelineInit(
     const InputConnectionConfig& input_connection_config) {
   std::vector<std::shared_ptr<BackendRuntime>> runtimes;
   graph_modules_ = modules;
+  global_runtime_ = std::make_shared<GlobalRuntime>(GLOBAL_MODULE_INDEX);
   // Creating a list of runtimes.
   for (size_t i = 0; i < graph_modules_.size(); i++) {
     auto run_item = std::make_shared<BackendRuntime>(graph_modules_[i], i);

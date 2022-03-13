@@ -619,4 +619,5 @@ def test_pipeline():
 
 
 if __name__ == "__main__":
-    pytest.main([__file__])
+    #pytest.main([__file__])
+    test_pipeline()

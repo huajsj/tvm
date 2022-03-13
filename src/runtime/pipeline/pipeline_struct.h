@@ -72,6 +72,12 @@ enum PipelineState {
   RUNNING,
   STOPPING,
 };
+/*!\brief The execution mode.*/
+enum ExecutionMode {
+  PIPELINE = 0,
+  SEQUENCIAL,
+  INVALID_MODE,
+};
 /*!
  *\brief The structure includes the module index and the module output index.
  */
