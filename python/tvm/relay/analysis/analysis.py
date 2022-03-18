@@ -26,7 +26,8 @@ from ...runtime.ndarray import cpu
 
 from . import _ffi_api
 from .feature import Feature
-
+import tvm
+from tvm import relay
 
 def post_order_visit(expr, fvisit):
     """Recursively visit the ir in post DFS order node,
@@ -435,7 +436,7 @@ def get_calibration_data(mod, data):
 """
 Split graph into a serial of sbgraph.
 """
-def pipeline_graph(expr, indices):
+def pipeline_graph(expr, indices, params):
     """Split Graph Into A Group Of Subgraph
     Parameters
     ----------
@@ -549,6 +550,7 @@ def pipeline_graph(expr, indices):
 
     pipeline_mods = []
 
+    expr = relay.build_module.bind_params_by_name(expr, params)
     # operator count start from 0, then initial value get set into -1
     operator_indx = -1
     constant_expr = None
