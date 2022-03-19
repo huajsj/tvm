@@ -224,6 +224,9 @@ class QueueData {
         TVMArrayAlloc(from->shape, from->ndim, from->dtype.code, from->dtype.bits,
                       from->dtype.lanes, from->device.device_type, from->device.device_id, &data_);
       } else {
+        std::cout << "from len is " << fromLen << "  to len is " <<  toLen << std::endl;
+        std::cout << "from dev" << from->device.device_type << "  to dev "
+                  <<  device_type_ << std::endl;
         LOG(FATAL) << "The 'from' data is not matched with the  'data_'.";
       }
     }
@@ -947,6 +950,9 @@ class BackendRuntime : public BasicRuntime {
     for (int i = 0; i < from->ndim; i++) {
       shape.push_back(from->shape[i]);
     }
+    std::cout << "from->device is "
+              << static_cast<DLDeviceType>(from->device.device_type)
+              << std::endl;
     auto ndarray = NDArray::Empty(shape, from->dtype, from->device);
     ndarray.CreateView(shape, from->dtype);
     return ndarray;
@@ -977,7 +983,8 @@ class BackendRuntime : public BasicRuntime {
     if (cpu_affinity_.empty()) {
       return;
     }
-    auto affinity_mode = tvm::runtime::threading::ThreadGroup::kSpecifyThreadShareAllCore;
+    //auto affinity_mode = tvm::runtime::threading::ThreadGroup::kSpecifyThreadShareAllCore;
+    auto affinity_mode = tvm::runtime::threading::ThreadGroup::kSpecifyOneCorePerThread;
     std::istringstream istr(cpu_affinity_);
     std::string affinity;
     std::vector<unsigned int> cpus;

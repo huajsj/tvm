@@ -24,12 +24,15 @@ Pipeline executing runtime.
 """
 # some standard imports
 import mxnet as mx
+import torch
 import tvm
 from tvm import relay, autotvm
 import numpy as np
 import threading
 from tvm._ffi import get_global_func
 from tvm.relay.analysis import pipeline_graph
+from tvm.contrib import utils
+from tvm import rpc
 
 config_threadpool = get_global_func('runtime.config_threadpool')
 ######################################################################
@@ -44,7 +47,9 @@ from matplotlib import pyplot as plt
 from tvm.contrib import graph_executor, pipeline_executor
 import time
 block = get_model("resnet18_v1", pretrained=True)
-
+shuffle = torch.hub.load('pytorch/vision:v0.10.0', 'shufflenet_v2_x1_0', pretrained=True)
+loop = 1
+pipeline = True
 def get_image():
     img_url = "https://github.com/dmlc/mxnet.js/blob/main/data/cat.png?raw=true"
     img_name = "cat.png"
@@ -101,16 +106,30 @@ def get_network(x):
     mods = pipeline_graph(func, pl, params)
     return func, mods, params
 
+remote = rpc.LocalSession()
+def remote_build(mod, target, params=None, target_host=None, mod_name="default"):
+    build_func = relay.build
+    lib = build_func(mod, target=target, params=params, target_host=target_host, mod_name= mod_name)
+
+    temp = utils.tempdir()
+    path = temp.relpath("lib.tar")
+    lib.export_library(path)
+    remote.upload(path)
+    lib = remote.load_module("lib.tar")
+    return lib
+
 def pipe_test(mods, img):
     mod1, mod2 = mods[0], mods[1]
     pipe_config = pipeline_executor.PipelineConfig()
-    pipe_config[mod1].target = "llvm"
-    pipe_config[mod1].dev = tvm.cpu(0)
+    pipe_config[mod1].target = "cuda" #"llvm"
+    pipe_config[mod1].dev = tvm.cuda(0)#tvm.cpu(0)
     pipe_config[mod1].cpu_affinity = "0,1,2,3,4,5,6,7"
 
+    #remote = rpc.LocalSession()
     pipe_config[mod2].target = "llvm"
-    pipe_config[mod2].dev = tvm.cpu(0)
+    pipe_config[mod2].dev = remote.cpu(0)#tvm.cpu(0)
     pipe_config[mod2].cpu_affinity = "8,9,10,11,12,13,14,15"
+    pipe_config[mod2].build_func = remote_build
 
 
     pipe_config["input"]["data"].connect(pipe_config[mod1]["input"]["data"])
@@ -121,23 +140,28 @@ def pipe_test(mods, img):
         pipeline_mod_factory = pipeline_executor.build(pipe_config)
     pipeline_module = pipeline_executor.PipelineModule(pipeline_mod_factory)
     t1 = time.time()
-    if 0:
-        for i in range(0, 1):
-            pipeline_module.set_input("data", img)
-            pipeline_module.run()
-        num = 0
-        output = []
-        while num < 1:
-            outputs = pipeline_module.get_output()
-            while len(outputs) == 0:
-                time.sleep(0.001)
-            num = num + 1
-    else:
+    if not pipeline:
         cpu_list = ['0','1','2','3','4','5','6','7']
         config_threadpool(-3, 8, cpu_list)
-        pipeline_module.set_input("data", img)
-        pipeline_module.run(1)
-        outputs = pipeline_module.get_output()
+
+    for i in range(0, loop):
+        if pipeline:
+            pipeline_module.set_input("data", img)
+            pipeline_module.run(0)
+        else:
+            pipeline_module.set_input("data", img)
+            pipeline_module.set_input("data", img)
+            pipeline_module.set_input("data", img)
+            pipeline_module.run(1)
+            outputs = pipeline_module.get_output()
+    
+    if pipeline:
+        num = 0
+        while num < loop:
+            while len(outputs := pipeline_module.get_output()) == 0:
+                time.sleep(0.001)
+            num = num + 1
+
     t2 = time.time()
     print("pipe test spend time is %s", t2 - t1)
     top1 = np.argmax(outputs[0].numpy())
@@ -152,12 +176,27 @@ def normal_test(func, x):
 
     ######################################################################
     # now compile the graph
+    do_remote = True
     #target = "cuda"
+    #dev = tvm.cuda(0)
     target = "llvm"
-    #log_file = "/scratch/hj/tvm-auto-ml/tvm-automl/mxnet_graph_opt.log.8"
-    #with autotvm.apply_history_best(log_file):
-    with tvm.transform.PassContext(opt_level=3):
-        lib = relay.build(func, target, params=params)
+    dev = tvm.cpu(0)
+    log_file = "/scratch/hj/tvm-auto-ml/tvm-automl/mxnet_graph_opt.log.16"
+    with autotvm.apply_history_best(log_file):
+        with tvm.transform.PassContext(opt_level=3):
+            #lib = relay.build(func, target, params=params)
+            lib = remote_build(func, target, params=params)
+            '''
+            #export lib
+            '''
+            if do_remote:
+                temp = utils.tempdir()
+                path = temp.relpath("lib.tar")
+                lib.export_library(path)
+                remote = rpc.LocalSession()
+                remote.upload(path)
+                lib = remote.load_module("lib.tar")
+                dev = remote.cpu(0)
 
     ######################################################################
     # Execute the portable graph on TVM
@@ -165,21 +204,19 @@ def normal_test(func, x):
     # Now, we would like to reproduce the same forward computation using TVM.
     from tvm.contrib import graph_executor
 
-    #dev = tvm.cuda(0)
-    dev = tvm.cpu(0)
     dtype = "float32"
 
     #cpu_list = ['0','16','2','17', '3', '18', '4', '19', '5','21','16','22','7','23','8','24']
     #cpu_list = ['0','1','2','3', '4', '5', '6', '7','8','9','10','11','12','13','14','15']
-    #cpu_list = ['0','1','2','3']
-    cpu_list = ['0','1','2','3','4','5','6','7']
-    config_threadpool(-3, 8, cpu_list)
+    #cpu_list = ['0', '1']
+    #cpu_list = ['0','1','2','3','4','5','6','7']
+    #config_threadpool(-3, 2, cpu_list)
     m = graph_executor.GraphModule(lib["default"](dev))
     t1 = time.time()
     # set inputs
     # execute
     #timer = m.module.time_evaluator("run", dev, number=10, repeat=10)
-    for i in range(0, 1):
+    for i in range(0, loop):
         m.set_input("data", tvm.nd.array(x.astype(dtype)))
         m.run()
         tvm_output = m.get_output(0)
