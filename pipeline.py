@@ -106,7 +106,15 @@ def get_network(x):
     mods = pipeline_graph(func, pl, params)
     return func, mods, params
 
-remote = rpc.LocalSession()
+local_demo = False
+if local_demo:
+    remote = rpc.LocalSession()
+else:
+    # The following is my environment, change this to the IP address of your target device
+    host = "172.19.1.141"
+    port = 9090
+    remote = rpc.connect(host, port)
+
 def remote_build(mod, target, params=None, target_host=None, mod_name="default"):
     build_func = relay.build
     lib = build_func(mod, target=target, params=params, target_host=target_host, mod_name= mod_name)
@@ -121,9 +129,9 @@ def remote_build(mod, target, params=None, target_host=None, mod_name="default")
 def pipe_test(mods, img):
     mod1, mod2 = mods[0], mods[1]
     pipe_config = pipeline_executor.PipelineConfig()
-    pipe_config[mod1].target = "cuda" #"llvm"
-    pipe_config[mod1].dev = tvm.cuda(0)#tvm.cpu(0)
-    pipe_config[mod1].cpu_affinity = "0,1,2,3,4,5,6,7"
+    pipe_config[mod1].target = "llvm"#"cuda" #"llvm"
+    pipe_config[mod1].dev = tvm.cpu(0)#tvm.cuda(0)#tvm.cpu(0)
+    pipe_config[mod1].cpu_affinity = "0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15"
 
     #remote = rpc.LocalSession()
     pipe_config[mod2].target = "llvm"
