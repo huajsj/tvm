@@ -46,10 +46,21 @@ from matplotlib import pyplot as plt
 
 from tvm.contrib import graph_executor, pipeline_executor
 import time
-block = get_model("resnet18_v1", pretrained=True)
-shuffle = torch.hub.load('pytorch/vision:v0.10.0', 'shufflenet_v2_x1_0', pretrained=True)
-loop = 1
-pipeline = True
+loop = 5
+do_pipeline_runtime = False
+pipeline_sequence = False
+sequence_use_8 =True
+do_cuda = False
+do_remote = False
+#model_name = 'resnet18_v1'
+model_name = 'vgg19'
+#block = get_model("resnet18_v1", pretrained=True)
+#block = get_model("resnet152_v1", pretrained=True)
+#block = get_model("vgg19", pretrained=True)
+block = get_model(model_name, pretrained=True)
+model_info = {"resnet18_v1":{'split_pos':43, 'input_name':'x_93',},
+              "vgg19":{'split_pos':34, 'input_name':'x_56'},}
+split_info = model_info[model_name]
 def get_image():
     img_url = "https://github.com/dmlc/mxnet.js/blob/main/data/cat.png?raw=true"
     img_name = "cat.png"
@@ -102,7 +113,7 @@ def get_network(x):
     func = mod["main"]
     func = relay.Function(func.params, relay.nn.softmax(func.body), None, func.type_params,
                                                         func.attrs)
-    pl = [43]
+    pl = [split_info['split_pos']]
     mods = pipeline_graph(func, pl, params)
     return func, mods, params
 
@@ -129,41 +140,44 @@ def remote_build(mod, target, params=None, target_host=None, mod_name="default")
 def pipe_test(mods, img):
     mod1, mod2 = mods[0], mods[1]
     pipe_config = pipeline_executor.PipelineConfig()
-    pipe_config[mod1].target = "llvm"#"cuda" #"llvm"
-    pipe_config[mod1].dev = tvm.cpu(0)#tvm.cuda(0)#tvm.cpu(0)
-    pipe_config[mod1].cpu_affinity = "0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15"
+    pipe_config[mod1].target = "cuda" if do_cuda else "llvm"
+    pipe_config[mod1].dev = tvm.cuda(0) if do_cuda else tvm.cpu(0)
+    pipe_config[mod1].cpu_affinity = "0,1,2,3,4,5,6,7"
 
-    #remote = rpc.LocalSession()
     pipe_config[mod2].target = "llvm"
-    pipe_config[mod2].dev = remote.cpu(0)#tvm.cpu(0)
+    pipe_config[mod2].dev = remote.cpu(0) if do_remote else tvm.cpu(0)
     pipe_config[mod2].cpu_affinity = "8,9,10,11,12,13,14,15"
-    pipe_config[mod2].build_func = remote_build
+    pipe_config[mod2].build_func = remote_build if do_remote else None
 
 
     pipe_config["input"]["data"].connect(pipe_config[mod1]["input"]["data"])
-    pipe_config[mod1]["output"][0].connect(pipe_config[mod2]["input"]["x_93"])
+    pipe_config[mod1]["output"][0].connect(pipe_config[mod2]["input"][split_info['input_name']])
     pipe_config[mod2]["output"]["0"].connect(pipe_config["output"][0])
     mconfig = pipe_config.get_config()
     with tvm.transform.PassContext(opt_level=3):
         pipeline_mod_factory = pipeline_executor.build(pipe_config)
     pipeline_module = pipeline_executor.PipelineModule(pipeline_mod_factory)
     t1 = time.time()
-    if not pipeline:
-        cpu_list = ['0','1','2','3','4','5','6','7']
-        config_threadpool(-3, 8, cpu_list)
+    if pipeline_sequence:
+        if sequence_use_8:
+            cpu_list = ['0','1','2','3','4','5','6','7']
+            config_threadpool(-3, 8, cpu_list)
+        else:
+            cpu_list = ['0','1','2','3','4','5','6','7','8','9','10','11','12','13','14','15']
+            config_threadpool(-3, 16, cpu_list)
 
     for i in range(0, loop):
-        if pipeline:
+        if not pipeline_sequence:
             pipeline_module.set_input("data", img)
             pipeline_module.run(0)
         else:
-            pipeline_module.set_input("data", img)
+            #pipeline_module.set_input("data", img)
             pipeline_module.set_input("data", img)
             pipeline_module.set_input("data", img)
             pipeline_module.run(1)
             outputs = pipeline_module.get_output()
     
-    if pipeline:
+    if not pipeline_sequence:
         num = 0
         while num < loop:
             while len(outputs := pipeline_module.get_output()) == 0:
@@ -172,11 +186,12 @@ def pipe_test(mods, img):
 
     t2 = time.time()
     print("pipe test spend time is %s", t2 - t1)
+    '''
     top1 = np.argmax(outputs[0].numpy())
     print("TVM prediction top-1:", top1, synset[top1])
+    '''
 
-
-def normal_test(func, x):
+def local_run(func, name, x):
     ## we want a probability so add a softmax operator
     #func = mod["main"]
     #func = relay.Function(func.params, relay.nn.softmax(func.body), None, func.type_params,
@@ -184,32 +199,19 @@ def normal_test(func, x):
 
     ######################################################################
     # now compile the graph
-    do_remote = True
     #target = "cuda"
     #dev = tvm.cuda(0)
-    target = "llvm"
-    dev = tvm.cpu(0)
+    target = "cuda" if do_cuda else "llvm"
+    dev = tvm.cuda(0) if do_cuda else tvm.cpu(0)
     log_file = "/scratch/hj/tvm-auto-ml/tvm-automl/mxnet_graph_opt.log.16"
-    with autotvm.apply_history_best(log_file):
-        with tvm.transform.PassContext(opt_level=3):
-            #lib = relay.build(func, target, params=params)
+    #with autotvm.apply_history_best(log_file):
+    with tvm.transform.PassContext(opt_level=3):
+        if do_remote:
             lib = remote_build(func, target, params=params)
-            '''
-            #export lib
-            '''
-            if do_remote:
-                temp = utils.tempdir()
-                path = temp.relpath("lib.tar")
-                lib.export_library(path)
-                remote = rpc.LocalSession()
-                remote.upload(path)
-                lib = remote.load_module("lib.tar")
-                dev = remote.cpu(0)
+            dev = remote.cpu(0)
+        else:
+            lib = relay.build(func, target, params=params)
 
-    ######################################################################
-    # Execute the portable graph on TVM
-    # ---------------------------------
-    # Now, we would like to reproduce the same forward computation using TVM.
     from tvm.contrib import graph_executor
 
     dtype = "float32"
@@ -217,29 +219,33 @@ def normal_test(func, x):
     #cpu_list = ['0','16','2','17', '3', '18', '4', '19', '5','21','16','22','7','23','8','24']
     #cpu_list = ['0','1','2','3', '4', '5', '6', '7','8','9','10','11','12','13','14','15']
     #cpu_list = ['0', '1']
-    #cpu_list = ['0','1','2','3','4','5','6','7']
-    #config_threadpool(-3, 2, cpu_list)
+    cpu_list = ['0','1','2','3','4','5','6','7']
+    config_threadpool(-3, 8, cpu_list)
     m = graph_executor.GraphModule(lib["default"](dev))
+    m.set_input(name, x)
     t1 = time.time()
-    # set inputs
-    # execute
-    #timer = m.module.time_evaluator("run", dev, number=10, repeat=10)
-    for i in range(0, loop):
-        m.set_input("data", tvm.nd.array(x.astype(dtype)))
-        m.run()
-        tvm_output = m.get_output(0)
+    m.run()
     t2 = time.time()
-    print("normaltest time is %s", t2 - t1)
-    #tcost = timer()
-    #std = np.std(tcost.results) * 1000
-    #mean = tcost.mean * 1000
-    #print("\nPerformed inference in %.2fms (std = %.2f)" % (mean, std))
-    # get outputs
+    tvm_output = m.get_output(0)
+    print("local run time is %s", t2 - t1)
+    return tvm_output
+
+def normal_test(func, mods, x):
+    dtype = "float32"
+    tvm_output = local_run(mods[0], 'data', tvm.nd.array(x.astype(dtype)))
+    tvm_output = local_run(mods[1], split_info['input_name'], tvm_output)
     top1 = np.argmax(tvm_output.numpy()[0])
-    print("TVM prediction top-1:", top1, synset[top1])
+    print("TVM Pipeline Graph prediction top-1:", top1, synset[top1])
+    tvm_output = local_run(func, 'data', x)
+    top1 = np.argmax(tvm_output.numpy()[0])
+    print("TVM Single Full Graph prediction top-1:", top1, synset[top1])
+
 
 x, synset = get_image()
 mod, mods, params = get_network(x)
 print("x", x.shape)
-#normal_test(mod, x)
-pipe_test(mods, x)
+if do_pipeline_runtime:
+    pipe_test(mods, x)
+else:
+    normal_test(mod, mods, x)
+
