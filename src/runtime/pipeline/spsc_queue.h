@@ -20,6 +20,8 @@
 #define TVM_RUNTIME_PIPELINE_SPSC_QUEUE_H_
 #include <cstddef>
 #include <thread>
+/**/
+using PollDataFunc = std::function<void(void*)>;
 /*!\brief A single producer and single consumer lock free queue.
  */
 template <typename SlotType, typename IDType = int, int QueueLength = 1024>
@@ -60,9 +62,16 @@ class SPSCLockFreeQueue {
    * \return Returning false when the queue is empty. Otherwise, return true.
    */
   template <typename data_type>
-  bool Poll(data_type* data) {
+  bool Poll(data_type* data, PollDataFunc poll_func = nullptr) {
     if (Empty()) return false;
     *data = queue_[head_];
+    ///*
+    if (poll_func == nullptr) {
+      *data = queue_[head_];
+    } else {
+      poll_func(&queue_[head_]);
+    }
+    //*/
     write_barrier();
     head_ = (head_ + 1) % len_;
     return true;

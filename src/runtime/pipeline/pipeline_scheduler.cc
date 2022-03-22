@@ -21,6 +21,7 @@
 #include <unordered_map>
 #include <utility>
 #include <vector>
+#include <chrono>
 namespace tvm {
 namespace runtime {
 /*!

@@ -230,6 +230,16 @@ class QueueData {
         LOG(FATAL) << "The 'from' data is not matched with the  'data_'.";
       }
     }
+    */
+    if (fromLen != toLen) {
+        if (data_) {
+          TVMArrayFree(data_);
+          data_ = nullptr;
+        }
+        TVMArrayAlloc(from->shape, from->ndim, from->dtype.code, from->dtype.bits,
+                      from->dtype.lanes, kDLCPU, from->device.device_id, &data_);
+
+    }
     TVMArrayCopyFromTo(const_cast<DLTensor*>(from), data_, nullptr);
     return data_;
   }
@@ -809,6 +819,8 @@ class BasicRuntime {
  */
 class BackendRuntime : public BasicRuntime {
  private:
+  int retry_time = std::numeric_limits<int>::max();
+  const int retry_max_limit = 100000;
   /*!The cpu affinity settings for this runtime.*/
   std::string cpu_affinity_ = "";
   /*!\brief The Runtime module of a backend graph executor.*/
@@ -880,6 +892,13 @@ class BackendRuntime : public BasicRuntime {
       auto target_input_interface_index = notify->first;
       // Loading the binding data.
       while (!this->LoadBindingData(target_input_interface_index)) {
+        /*
+        if (retry_time >= retry_max_limit) {
+          retry_time = 0;
+        } else {
+          continue;
+        }
+        */
         // Waiting for the notification.
         if (!notify->second->Wait()) {
           exit_notify = true;
@@ -903,7 +922,10 @@ class BackendRuntime : public BasicRuntime {
     auto queue = input_queue_[input_index];
     QueueData data;
     // TODO(huajsj): Doing the 'SetInput' inside the poll function to avoid one time data copy.
-    if (!queue->Poll<QueueData>(&data)) {
+    if (!queue->Poll<QueueData>(&data/*, [&](void* data) {
+          QueueData* pdata = static_cast<QueueData *>(data);
+           SetInput(input_index, pdata->GetDLData());
+        }*/)) {
       return false;
     }
     SetInput(input_index, data.GetDLData());
