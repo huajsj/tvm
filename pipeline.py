@@ -47,7 +47,7 @@ from matplotlib import pyplot as plt
 from tvm.contrib import graph_executor, pipeline_executor
 import time
 loop = 1000
-do_pipeline_runtime = False
+do_pipeline_runtime = True
 pipeline_sequence = False
 sequence_use_8 = False
 do_cuda = False
@@ -59,7 +59,7 @@ model_name = 'resnet18_v1'
 #block = get_model("resnet152_v1", pretrained=True)
 #block = get_model("vgg19", pretrained=True)
 block = get_model(model_name, pretrained=True)
-model_info = {"resnet18_v1":{'split_pos':26, 'input_name':'x_55',},
+model_info = {"resnet18_v1":{'split_pos':38, 'input_name':'x_74',},
 #model_info = {"resnet18_v1":{'split_pos':43, 'input_name':'x_93',},
               "vgg19":{'split_pos':22, 'input_name':'x_36'},}
 split_info = model_info[model_name]
@@ -156,7 +156,7 @@ def pipe_test(mods, img):
 
 
     pipe_config["input"]["data"].connect(pipe_config[mod1]["input"]["data"])
-    pipe_config["input"]["x_57"].connect(pipe_config[mod2]["input"]["x_57"])
+    pipe_config["input"]["x_83"].connect(pipe_config[mod2]["input"]["x_83"])
     pipe_config[mod1]["output"][0].connect(pipe_config[mod2]["input"][split_info['input_name']])
     pipe_config[mod2]["output"]["0"].connect(pipe_config["output"][0])
     mconfig = pipe_config.get_config()
@@ -183,7 +183,7 @@ def pipe_test(mods, img):
     for i in range(0, loop):
         if not pipeline_sequence:
             pipeline_module.set_input("data", first_data[i%15])#img)
-            pipeline_module.set_input("x_57", second_data[i%15])
+            pipeline_module.set_input("x_83", second_data[i%15])
             pipeline_module.run(0)
         else:
             #pipeline_module.set_input("data", img)
@@ -217,13 +217,13 @@ def local_run(func, name, x, remote_do = False):
     target = "cuda" if do_cuda else "llvm"
     dev = tvm.cuda(0) if do_cuda else tvm.cpu(0)
     log_file = "/scratch/hj/tvm-auto-ml/tvm-automl/mxnet_graph_opt.log.16"
-    #with autotvm.apply_history_best(log_file):
-    with tvm.transform.PassContext(opt_level=3):
-        if remote_do:
-            lib = remote_build(func, target, params=params)
-            dev = remote.cpu(0)
-        else:
-            lib = relay.build(func, target, params=params)
+    with autotvm.apply_history_best(log_file):
+        with tvm.transform.PassContext(opt_level=3):
+            if remote_do:
+                lib = remote_build(func, target, params=params)
+                dev = remote.cpu(0)
+            else:
+                lib = relay.build(func, target, params=params)
 
     from tvm.contrib import graph_executor
 
