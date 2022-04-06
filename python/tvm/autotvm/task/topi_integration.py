@@ -157,6 +157,7 @@ def register_topi_compute(task_name, func=None):
             """wrapper function for topi compute"""
             assert not kwargs, "Do not support kwargs in template function call"
             task_env = TaskExtractEnv.current
+            #print(task_name)
             if task_env is not None and task_env.tracing:
                 task_env.add_task(task_name, args)
             workload = args_to_workload(args, task_name)

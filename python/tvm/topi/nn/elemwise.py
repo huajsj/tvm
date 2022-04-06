@@ -20,9 +20,10 @@ import tvm
 from tvm import te
 from .. import tag
 from ..utils import get_const_int
-
+from tvm import autotvm
 
 @tvm.te.tag_scope(tag=tag.ELEMWISE)
+#@autotvm.register_topi_compute("relu.x86")
 def relu(x):
     """Take relu of input x.
 
@@ -36,6 +37,7 @@ def relu(x):
     y : tvm.te.Tensor
         The result.
     """
+    print("relu ******************************")
     return te.compute(x.shape, lambda *i: tvm.te.max(x(*i), tvm.tir.const(0, x.dtype)))
 
 

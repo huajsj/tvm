@@ -138,9 +138,10 @@ def extract_from_multiple_program(mods, params, target, target_host=None, ops=No
             ), "only support relay Module or Function to be tuned"
             relay.backend.te_compiler.get().clear()
             # wrap build call in thread to avoid multiprocessing problems
-            build_thread = threading.Thread(target=_lower, args=(mod, target, param))
-            build_thread.start()
-            build_thread.join()
+            #build_thread = threading.Thread(target=_lower, args=(mod, target, param))
+            #build_thread.start()
+            #build_thread.join()
+            _lower(mod, target, param)
             relay.backend.te_compiler.get().clear()
             # Clear the warning message cache in FallbackContext
             if isinstance(DispatchContext.current, FallbackContext):
