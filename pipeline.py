@@ -47,7 +47,7 @@ from matplotlib import pyplot as plt
 from tvm.contrib import graph_executor, pipeline_executor
 import time
 loop = 1000
-do_pipeline_runtime = True
+do_pipeline_runtime = False
 pipeline_sequence = False
 sequence_use_8 = False
 do_cuda = False
