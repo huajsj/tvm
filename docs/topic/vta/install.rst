@@ -146,6 +146,9 @@ The build process should take roughly 5 minutes.
 .. code:: bash
 
    ssh xilinx@192.168.2.99
+   # You'll need to set the following paths to use VTA
+   export TVM_PATH=<path to TVM root>
+   export VTA_HW_PATH=$TVM_PATH/3rdparty/vta-hw
    # Build TVM runtime library (takes 5 mins)
    cd /home/xilinx/tvm
    mkdir build
@@ -156,8 +159,6 @@ The build process should take roughly 5 minutes.
    cd build
    cmake ..
    make runtime vta -j2
-   # FIXME (tmoreau89): remove this step by fixing the cmake build
-   make clean; make runtime vta -j2
    # Build VTA RPC server (takes 1 min)
    cd ..
    sudo ./apps/vta_rpc/start_rpc_server.sh # pw is 'xilinx'
