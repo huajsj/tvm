@@ -27,6 +27,7 @@ from ...runtime.ndarray import cpu
 from . import _ffi_api
 from .feature import Feature
 import tvm
+import json
 
 def post_order_visit(expr, fvisit):
     """Recursively visit the ir in post DFS order node,
@@ -432,6 +433,134 @@ def get_calibration_data(mod, data):
 
     return calib_data
 
+def parse_layer_perf(perf_files):
+    ret = {}
+    def parse(input_file_name, output_file_name):
+        f = open(input_file_name)
+        fw = open(output_file_name, 'w')
+        while True and f:
+            line = f.readline()
+            if not line:
+                break
+            if line.strip()[0] == '#':
+                continue
+            config = json.loads(line)
+            output = {}
+            output["name"] = config['input'][1]
+            output["s1"] = config['input'][2][0][1]
+            output["s2"] = config['input'][2][1][1]
+            output["perf"] = config['result'][0][0]
+            config_string = json.dumps(output)
+            print(config_string)
+            fw.write(config_string)
+            fw.write('\n')
+        f.close()
+    for _, (dev, input) in enumerate(perf_files.items()):
+        output = "./"+dev+".json"
+        parse(input, output)
+        ret[dev] = output
+    return ret;
+
+
+def parse_network(expr, config):
+    """Split Graph Into A Group Of Subgraph
+    Parameters
+    ----------
+    expr : tvm.relay.Expr
+    indices : Array[int]
+    Returns
+    -------
+    ret : Array[tvm.relay.IRModule]
+    """
+
+    def shape_make(shape):
+        ret = '['
+        for num in shape:
+            ret = ret + str(num) + ","
+        ret = ret + ']'
+        return ret
+
+    def op_name_simply(name):
+        return name.split('_')[0]
+
+    def load_perf(perf_list):
+        pdata = {}
+        for _,(device, file_name) in enumerate(perf_list.items()):
+          perf_data = {}
+          f = open(file_name)
+          while True:
+              data = f.readline()
+              if not data:
+                  break;
+              config = json.loads(data)
+              key = (op_name_simply(config['name']) + shape_make(config['s1']) +
+                     shape_make(config['s2']))
+              layer_perf = config["perf"]
+              perf_data[key] = layer_perf
+          pdata[device] = perf_data
+        return pdata
+
+    def get_op_perf(value, perf):
+        name = str(value.op.name).split('.')[1]
+        key = name + (shape_make(value.args[0].checked_type.concrete_shape) + 
+              shape_make(value.args[1].checked_type.concrete_shape))
+        perf_list = {}
+        for _,(device, perf) in enumerate(perf.items()):
+            perf_list[device] = perf[key]
+        return perf_list
+
+
+    def run_opt_pass(expr, opt_pass):
+        """Exectue a relay pass"""
+        assert isinstance(opt_pass, tvm.transform.Pass)
+        mod = tvm.IRModule.from_expr(expr)
+        mod = tvm.relay.transform.InferType()(mod)
+        mod = opt_pass(mod)
+        entry = mod["main"]
+        return entry if isinstance(expr, tvm.relay.Function) else entry.body
+
+    def _recursion(anf, index, perf_data):
+        if isinstance(anf, tvm.relay.Function):
+            return tvm.relay.Function(
+                anf.params,
+                _recursion(anf.body, index, perf_data),
+                anf.ret_type,
+                anf.type_params,
+                anf.attrs,
+            )
+        if isinstance(anf, tvm.relay.expr.Let):
+            value = anf.value
+
+            if isinstance(value, tvm.relay.expr.Call):
+                if isinstance(value.op, tvm.ir.Op):
+                    if str(value.op.name) == "nn.conv2d":
+                        perf = get_op_perf(value, perf_data)
+                        layer = "{{{}_{}, {}, {}}}".format(
+                            value.op.name,
+                            index,
+                            str(value.args[0].checked_type.concrete_shape),
+                            str(value.args[1].checked_type.concrete_shape))
+                        layer_perf = {}
+                        layer_perf[f"{value.op.name}_{index}"] = perf
+                        print(layer_perf)
+                        index = index + 1
+
+            return tvm.relay.expr.Let(
+                anf.var,
+                value,
+                _recursion(anf.body, index, perf_data),
+            )
+        else:
+            return anf
+    perf_list = parse_layer_perf(config)
+    perf_data = load_perf(perf_list)
+    # operator count start from 0, then initial value get set into -1
+    anf = run_opt_pass(expr, transform.ToANormalForm())
+    anf = run_opt_pass(anf, transform.InferType())
+    index = 0
+    ann = _recursion(anf, index, perf_data)
+    ann = run_opt_pass(ann.body, transform.ToGraphNormalForm())
+    mod = tvm.IRModule.from_expr(ann)
 
 """
 Split graph into a serial of sbgraph.
@@ -474,6 +603,7 @@ def pipeline_graph(expr, indices):
 
         # If body not let, then reached end of the express
         if not isinstance(constant_expr.body, tvm.relay.expr.Let):
+            p.name
             return tvm.relay.expr.Let(constant_expr.var, constant_expr.value, expr)
 
         return tvm.relay.expr.Let(
@@ -561,3 +691,5 @@ def pipeline_graph(expr, indices):
     mod = tvm.IRModule.from_expr(ann)
     pipeline_mods.insert(0, mod)
     return pipeline_mods
+
+
