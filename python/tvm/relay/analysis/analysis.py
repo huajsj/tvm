@@ -519,11 +519,11 @@ def parse_network(expr, config):
         entry = mod["main"]
         return entry if isinstance(expr, tvm.relay.Function) else entry.body
 
-    def _recursion(anf, index, perf_data):
+    def _recursion(anf, index, perf_data, perf_ret):
         if isinstance(anf, tvm.relay.Function):
             return tvm.relay.Function(
                 anf.params,
-                _recursion(anf.body, index, perf_data),
+                _recursion(anf.body, index, perf_data, perf_ret),
                 anf.ret_type,
                 anf.type_params,
                 anf.attrs,
@@ -543,12 +543,13 @@ def parse_network(expr, config):
                         layer_perf = {}
                         layer_perf[f"{value.op.name}_{index}"] = perf
                         print(layer_perf)
-                        index = index + 1
+                        perf_ret[index] = layer_perf
 
+            index = index + 1
             return tvm.relay.expr.Let(
                 anf.var,
                 value,
-                _recursion(anf.body, index, perf_data),
+                _recursion(anf.body, index, perf_data, perf_ret),
             )
         else:
             return anf
@@ -558,7 +559,8 @@ def parse_network(expr, config):
     anf = run_opt_pass(expr, transform.ToANormalForm())
     anf = run_opt_pass(anf, transform.InferType())
     index = 0
-    ann = _recursion(anf, index, perf_data)
+    perf_ret = {}
+    ann = _recursion(anf, index, perf_data, perf_ret)
     ann = run_opt_pass(ann.body, transform.ToGraphNormalForm())
     mod = tvm.IRModule.from_expr(ann)
 
