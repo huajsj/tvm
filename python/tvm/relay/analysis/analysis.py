@@ -504,9 +504,12 @@ def parse_network(expr, config):
         name = str(value.op.name).split('.')[1]
         key = name + (shape_make(value.args[0].checked_type.concrete_shape) + 
               shape_make(value.args[1].checked_type.concrete_shape))
-        perf_list = {}
+        perf_list = []
         for _,(device, perf) in enumerate(perf.items()):
-            perf_list[device] = perf[key]
+            dev_perf = {}
+            dev_perf["dev"] = device
+            dev_perf["perf"] = perf[key]
+            perf_list.append(dev_perf)
         return perf_list
 
 
@@ -541,9 +544,12 @@ def parse_network(expr, config):
                             str(value.args[0].checked_type.concrete_shape),
                             str(value.args[1].checked_type.concrete_shape))
                         layer_perf = {}
-                        layer_perf[f"{value.op.name}_{index}"] = perf
+                        layer_perf["op"] = f"{value.op.name}"
+                        layer_perf["op_index"] = 0
+                        layer_perf["network_index"] = index
+                        layer_perf[f"perf"] = perf
                         print(layer_perf)
-                        perf_ret[index] = layer_perf
+                        perf_ret.append(layer_perf)
 
             index = index + 1
             return tvm.relay.expr.Let(
@@ -559,10 +565,9 @@ def parse_network(expr, config):
     anf = run_opt_pass(expr, transform.ToANormalForm())
     anf = run_opt_pass(anf, transform.InferType())
     index = 0
-    perf_ret = {}
+    perf_ret = []
     ann = _recursion(anf, index, perf_data, perf_ret)
-    ann = run_opt_pass(ann.body, transform.ToGraphNormalForm())
-    mod = tvm.IRModule.from_expr(ann)
+    return json.dumps(perf_ret)
 
 """
 Split graph into a serial of sbgraph.

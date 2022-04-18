@@ -236,4 +236,7 @@ cpu = "./yolov3-tiny-arm-cpu.log"
 vta = "./yolov3-tiny.log"
 config = {'cpu':cpu, 'vta':vta}
 #parse_network(mod, {"cpu":"./cpu.json", "vta":"./vta.json"})
-parse_network(mod, config)
+net_conf = parse_network(mod, config)
+get_split = tvm._ffi.get_global_func("autotvm.feature.GetSplitConfig", allow_missing=False)
+conf = get_split(str(net_conf))
+print(conf)
