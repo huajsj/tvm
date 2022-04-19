@@ -23,7 +23,6 @@
  */
 
 #include "pipline_split.h"
-#include <cassert>
 #include <algorithm>
 #include <cmath>
 #include <set>
@@ -116,6 +115,8 @@ void AutoTune::GenerateBalance(int current_pipeline_index,
             float perf = std::numeric_limits<float>::min();
             for (auto x:sub_list) {
                 //std::cout << x ;
+                auto cur_perf =  GetPerSum(x, lperf);
+                x.perf = cur_perf;
                 perf = std::max(perf, GetPerSum(x, lperf));
             }
             //std::cout << "  average perf is " << perf << std::endl;
@@ -145,17 +146,33 @@ void AutoTune::GenerateBalance(int current_pipeline_index,
        }
     }
 
-void AutoTune::ShowBest() {
+std::string AutoTune::FormatBest(size_t list_max_num) {
       std::sort(perf_list.begin(), perf_list.end(), comp);
-      size_t max_list = 10;
-      std::cout << "The top " << max_list << "  best split configure are: " << std::endl;
-      for (int i = 0; i < std::min(perf_list.size(), max_list); i++) {
-          auto item = perf_list[i];
-          for (auto x:item.second) {
-             std::cout << x << " ";
-          }
-          std::cout << " perf is " << item.first << std::endl;
+      std::ostringstream os;
+      dmlc::JSONWriter writer(&os);
+      std::cout << "The top " << list_max_num << "  best split configure are: " << std::endl;
+      writer.BeginArray();
+      for (int i = 0; i < std::min(perf_list.size(), list_max_num); i++) {
+        std::string str_format;
+        auto item = perf_list[i];
+        writer.BeginArray();
+        int index = 0;
+        for (auto x:item.second) {
+          x.SetLayerInfo(layer_map_);
+          writer.WriteObjectKeyValue("subgraph_index", index);
+          x.update_perf(layer_perf_);
+          writer.WriteObjectKeyValue("layer_info", x);
+          std::cout << x << " ";
+          /*[[{"start":{},"end":{}}, {"start":{},"end":{}}], []]
+              */
+          index ++;
+        }
+        writer.EndArray();
+        std::cout << " perf is " << item.first << std::endl;
       }
+      writer.EndArray();
+      //std::cout << os.str() << std::endl;
+      return os.str();
     }
 float AutoTune::GetPerSum(DPItem di, std::unordered_map<int, PERF> lperf) {
         DevType  dtype = di.dev_type;
@@ -165,19 +182,8 @@ float AutoTune::GetPerSum(DPItem di, std::unordered_map<int, PERF> lperf) {
         }
         return ret;
     }
-/*
-TEST(AutoSplitting, TVMAutoSplitting) {
-    std::cout << "Perf Data !\n";
-    int net_depth = 15;
-    std::list<DPItem> list;
-    AutoTune at;
-    at.GenerateGraph(net_depth);
-    AutoTune::GenerateBalance(0, at.layer_perf_,at.dev_.size(), -1,
-                              {CPU, GPU, FPGA}, net_depth, list, at.perf_list);
-    at.ShowBest();
-}
-*/
-Array<String> GetSplitConfig(const std::string& json) {
+
+String GetSplitConfig(const std::string& json) {
   std::istringstream is(json);
   dmlc::JSONReader reader(&is);
   std::list<DPItem> list;
@@ -186,8 +192,7 @@ Array<String> GetSplitConfig(const std::string& json) {
   std::vector<DevType> available_dev {CPU, VTA};
   AutoTune::GenerateBalance(0, at.layer_perf_,available_dev.size(), -1,
                               {CPU, VTA}, net_depth, list, at.perf_list);
-  at.ShowBest();
-  return {"1","2", "3"};
+  return at.FormatBest();
 }
 TVM_REGISTER_GLOBAL("autotvm.feature.GetSplitConfig")
     .set_body([](TVMArgs args, TVMRetValue* ret) {

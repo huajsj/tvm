@@ -522,11 +522,11 @@ def parse_network(expr, config):
         entry = mod["main"]
         return entry if isinstance(expr, tvm.relay.Function) else entry.body
 
-    def _recursion(anf, index, perf_data, perf_ret):
+    def _recursion(anf, index, operator_index_map, perf_data, perf_ret):
         if isinstance(anf, tvm.relay.Function):
             return tvm.relay.Function(
                 anf.params,
-                _recursion(anf.body, index, perf_data, perf_ret),
+                _recursion(anf.body, index, operator_index_map,perf_data, perf_ret),
                 anf.ret_type,
                 anf.type_params,
                 anf.attrs,
@@ -545,7 +545,12 @@ def parse_network(expr, config):
                             str(value.args[1].checked_type.concrete_shape))
                         layer_perf = {}
                         layer_perf["op"] = f"{value.op.name}"
-                        layer_perf["op_index"] = 0
+                        if value.op.name in operator_index_map:
+                            operator_index_map[value.op.name] = \
+                                operator_index_map[value.op.name] + 1
+                        else:
+                            operator_index_map[value.op.name] = 0
+                        layer_perf["op_index"] = operator_index_map[value.op.name]
                         layer_perf["network_index"] = index
                         layer_perf[f"perf"] = perf
                         print(layer_perf)
@@ -555,7 +560,7 @@ def parse_network(expr, config):
             return tvm.relay.expr.Let(
                 anf.var,
                 value,
-                _recursion(anf.body, index, perf_data, perf_ret),
+                _recursion(anf.body, index, operator_index_map, perf_data, perf_ret),
             )
         else:
             return anf
@@ -565,8 +570,9 @@ def parse_network(expr, config):
     anf = run_opt_pass(expr, transform.ToANormalForm())
     anf = run_opt_pass(anf, transform.InferType())
     index = 0
+    operator_index_map = {}
     perf_ret = []
-    ann = _recursion(anf, index, perf_data, perf_ret)
+    ann = _recursion(anf, index, operator_index_map, perf_data, perf_ret)
     return json.dumps(perf_ret)
 
 """

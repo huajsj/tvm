@@ -25,6 +25,7 @@
 #ifndef TVM_AUTOTVM_TOUCH_EXTRACTOR_H_
 #define TVM_AUTOTVM_TOUCH_EXTRACTOR_H_
 
+#include <cassert>
 #include <dmlc/json.h>
 #include <tvm/runtime/registry.h>
 #include <tvm/tir/expr.h>
@@ -41,6 +42,25 @@
 namespace tvm {
 namespace autotvm {
 enum DevType { CPU=0, GPU, VTA, DEV_MAX};
+using PERF=std::unordered_map<DevType, float>;
+struct LayerInfo {
+  LayerInfo(std::string name, int op_idx, int network_idx):op_name(name), op_index(op_idx),
+     network_index(network_idx){ empty_ = false;}
+  LayerInfo(){
+  }
+  bool empty() {return empty_;};
+  bool empty_ = true;
+  std::string op_name;
+  int op_index;
+  int network_index;
+  void Save(dmlc::JSONWriter* writer) const {
+     writer->BeginObject();
+     writer->WriteObjectKeyValue("op_index", op_index);
+     writer->WriteObjectKeyValue("network_index", op_index);
+     writer->WriteObjectKeyValue("op_name", op_name);
+     writer->EndObject();
+  }
+};
 typedef struct DPItem_ {
     DPItem_() {};
     DPItem_(int s, int e, DevType d):start(s), end(e), dev_type(d){};
@@ -48,6 +68,30 @@ typedef struct DPItem_ {
     int end;
     float perf = std::numeric_limits<float>::max();
     DevType dev_type = DEV_MAX;
+    LayerInfo start_layer, end_layer;
+    std::unordered_map<int, LayerInfo> layer_map;
+    void update_perf(std::unordered_map<int, PERF> lperf) {
+        float ret =0 ;
+        for (int i = start; i <= end; i++) {
+            ret += lperf[i][dev_type];
+        }
+        perf = ret;
+      
+    }
+    void Save(dmlc::JSONWriter* writer) const{
+      assert(!start_layer.empty());
+      assert(!end_layer.empty());
+      writer->BeginObject();
+      writer->WriteObjectKeyValue("start", start_layer);
+      writer->WriteObjectKeyValue("end", end_layer);
+      writer->WriteObjectKeyValue("device", DPItem_::GetTypeString(dev_type));
+      writer->WriteObjectKeyValue("perf", perf);
+      writer->EndObject();
+    }
+    void SetLayerInfo(std::unordered_map<int, LayerInfo>  info) {
+      start_layer = info[start];
+      end_layer = info[end];
+    }
     static DevType GetType(std::string dev) {
       DevType dtype = DEV_MAX;
       std::transform(dev.begin(), dev.end(), dev.begin(),
@@ -89,17 +133,8 @@ struct {
        }
 }comp;
 
-struct LayerInfo {
-  LayerInfo(std::string name, int op_idx, int network_idx):op_name(name), op_index(op_idx),
-     network_index(network_idx){;}
-  LayerInfo(){}
-  std::string op_name;
-  int op_index;
-  int network_index;
-};
 
 class AutoTune {
-    using PERF=std::unordered_map<DevType, float>;
  public:
     AutoTune(dmlc::JSONReader& reader) {
       srand(time(NULL));
@@ -116,7 +151,7 @@ class AutoTune {
                          int network_depth,
                          std::list<DPItem> &sub_list,
                          std::vector<std::pair<float, std::list<DPItem>>>& perf_list);
-    void ShowBest();
+    std::string FormatBest(size_t list_max_num = 10);
     std::unordered_map<int, PERF> layer_perf_;
     std::unordered_map<int, LayerInfo> layer_map_;
     /*device weight*/
