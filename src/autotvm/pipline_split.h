@@ -133,6 +133,35 @@ struct {
        }
 }comp;
 
+class SubgraphItem {
+ public:
+   explicit SubgraphItem(DPItem item, int index):dpitem_(item), subgraph_index_(index) {
+   }
+   void Save(dmlc::JSONWriter* writer) const{
+      writer->BeginObject();
+      writer->WriteObjectKeyValue("subgraph_index", subgraph_index_);
+      writer->WriteObjectKeyValue("layer_info", dpitem_);
+      writer->EndObject();
+   }
+ private:
+  int subgraph_index_;
+  DPItem dpitem_;
+};
+
+class SubgraphSplit{
+ public:
+   explicit SubgraphSplit(std::vector<SubgraphItem> slist):subgraph_list_(slist) {
+   }
+   void Save(dmlc::JSONWriter* writer) const{
+     writer->BeginArray();
+     for (auto x:subgraph_list_) {
+      writer->WriteArrayItem(x);
+     }
+     writer->EndArray();
+   }
+ private:
+   std::vector<SubgraphItem> subgraph_list_;
+};
 
 class AutoTune {
  public:

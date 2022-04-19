@@ -155,19 +155,20 @@ std::string AutoTune::FormatBest(size_t list_max_num) {
       for (int i = 0; i < std::min(perf_list.size(), list_max_num); i++) {
         std::string str_format;
         auto item = perf_list[i];
-        writer.BeginArray();
         int index = 0;
+        std::vector<SubgraphItem> list;
         for (auto x:item.second) {
           x.SetLayerInfo(layer_map_);
-          writer.WriteObjectKeyValue("subgraph_index", index);
           x.update_perf(layer_perf_);
-          writer.WriteObjectKeyValue("layer_info", x);
+          SubgraphItem item(x, index);
+          list.push_back(item);
           std::cout << x << " ";
           /*[[{"start":{},"end":{}}, {"start":{},"end":{}}], []]
               */
           index ++;
         }
-        writer.EndArray();
+        SubgraphSplit split(list);
+        writer.WriteArrayItem(split);
         std::cout << " perf is " << item.first << std::endl;
       }
       writer.EndArray();

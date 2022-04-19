@@ -63,180 +63,190 @@ from tvm.contrib.download import download_testdata
 from vta.testing import simulator
 from vta.top import graph_pack
 from tvm.relay.analysis import parse_network, parse_layer_perf
+import json
 # Make sure that TVM was compiled with RPC=1
 assert tvm.runtime.enabled("rpc")
 
-##############################################################################
-# Download yolo net configure file, weight file, darknet library file based on
-# Model Name
-# ----------------------------------------------------------------------------
-MODEL_NAME = "yolov3-tiny"
-REPO_URL = "https://github.com/dmlc/web-data/blob/main/darknet/"
+def GetModule():
+    ##############################################################################
+    # Download yolo net configure file, weight file, darknet library file based on
+    # Model Name
+    # ----------------------------------------------------------------------------
+    MODEL_NAME = "yolov3-tiny"
+    REPO_URL = "https://github.com/dmlc/web-data/blob/main/darknet/"
 
-cfg_path = download_testdata(
-    "https://github.com/pjreddie/darknet/blob/master/cfg/" + MODEL_NAME + ".cfg" + "?raw=true",
-    MODEL_NAME + ".cfg",
-    module="darknet",
-)
-weights_path = download_testdata(
-    "https://pjreddie.com/media/files/" + MODEL_NAME + ".weights" + "?raw=true",
-    MODEL_NAME + ".weights",
-    module="darknet",
-)
-
-if sys.platform in ["linux", "linux2"]:
-    darknet_lib_path = download_testdata(
-        REPO_URL + "lib/" + "libdarknet2.0.so" + "?raw=true", "libdarknet2.0.so", module="darknet"
-    )
-elif sys.platform == "darwin":
-    darknet_lib_path = download_testdata(
-        REPO_URL + "lib_osx/" + "libdarknet_mac2.0.so" + "?raw=true",
-        "libdarknet_mac2.0.so",
+    cfg_path = download_testdata(
+        "https://github.com/pjreddie/darknet/blob/master/cfg/" + MODEL_NAME + ".cfg" + "?raw=true",
+        MODEL_NAME + ".cfg",
         module="darknet",
     )
-else:
-    raise NotImplementedError("Darknet lib is not supported on {} platform".format(sys.platform))
-
-##################################################
-# Download yolo categories and illustration front.
-# ------------------------------------------------
-coco_path = download_testdata(
-    REPO_URL + "data/" + "coco.names" + "?raw=true", "coco.names", module="data"
-)
-font_path = download_testdata(
-    REPO_URL + "data/" + "arial.ttf" + "?raw=true", "arial.ttf", module="data"
-)
-with open(coco_path) as f:
-    content = f.readlines()
-names = [x.strip() for x in content]
-
-########################################
-# Define the platform and model targets.
-# --------------------------------------
-# Execute on CPU vs. VTA, and define the model.
-
-# Load VTA parameters from the 3rdparty/vta-hw/config/vta_config.json file
-env = vta.get_env()
-# Set ``device=arm_cpu`` to run inference on the CPU
-# or ``device=vta`` to run inference on the FPGA.
-device = "vta"
-target = env.target if device == "vta" else env.target_vta_cpu
-
-pack_dict = {
-    "yolov3-tiny": ["nn.max_pool2d", "cast", 4, 186],
-}
-
-# Name of Darknet model to compile
-# The ``start_pack`` and ``stop_pack`` labels indicate where
-# to start and end the graph packing relay pass: in other words
-# where to start and finish offloading to VTA.
-# the number 4 indicate the the ``start_pack`` index is 4, the
-# number 186 indicate the ``stop_pack index`` is 186, by using
-# name and index number, here we can located to correct place
-# where to start/end when there are multiple ``nn.max_pool2d``
-# or ``cast``, print(mod.astext(show_meta_data=False)) can help
-# to find operator name and index information.
-assert MODEL_NAME in pack_dict
-
-#############################
-# Obtain an execution remote.
-# ---------------------------
-# When target is 'pynq' or other FPGA backend, reconfigure FPGA and runtime.
-# Otherwise, if target is 'sim', execute locally.
-
-if env.TARGET not in ["sim", "tsim"]:
-    # Get remote from tracker node if environment variable is set.
-    # To set up the tracker, you'll need to follow the "Auto-tuning
-    # a convolutional network for VTA" tutorial.
-    tracker_host = os.environ.get("TVM_TRACKER_HOST", None)
-    tracker_port = os.environ.get("TVM_TRACKER_PORT", None)
-    # Otherwise if you have a device you want to program directly from
-    # the host, make sure you've set the variables below to the IP of
-    # your board.
-    device_host = os.environ.get("VTA_RPC_HOST", "192.168.2.99")
-    device_port = os.environ.get("VTA_RPC_PORT", "9091")
-    if not tracker_host or not tracker_port:
-        remote = rpc.connect(device_host, int(device_port))
-    else:
-        remote = autotvm.measure.request_remote(
-            env.TARGET, tracker_host, int(tracker_port), timeout=10000
-        )
-    # Reconfigure the JIT runtime and FPGA.
-    # You can program the FPGA with your own custom bitstream
-    # by passing the path to the bitstream file instead of None.
-    reconfig_start = time.time()
-    vta.reconfig_runtime(remote)
-    vta.program_fpga(remote, bitstream=None)
-    reconfig_time = time.time() - reconfig_start
-    print("Reconfigured FPGA and RPC runtime in {0:.2f}s!".format(reconfig_time))
-
-# In simulation mode, host the RPC server locally.
-else:
-    remote = rpc.LocalSession()
-
-# Get execution context from remote
-ctx = remote.ext_dev(0) if device == "vta" else remote.cpu(0)
-
-#####################################
-# Build the inference graph executor.
-# -----------------------------------
-# Using Darknet library load downloaded vision model and compile with Relay.
-# The compilation steps are:
-#
-# 1. Front end translation from Darknet into Relay module.
-# 2. Apply 8-bit quantization: here we skip the first conv layer,
-#    and dense layer which will both be executed in fp32 on the CPU.
-# 3. Perform graph packing to alter the data layout for tensorization.
-# 4. Perform constant folding to reduce number of operators (e.g. eliminate batch norm multiply).
-# 5. Perform relay build to object file.
-# 6. Load the object file onto remote (FPGA device).
-# 7. Generate graph executor, `m`.
-
-# Load pre-configured AutoTVM schedules
-with autotvm.tophub.context(target):
-    net = __darknetffi__.dlopen(darknet_lib_path).load_network(
-        cfg_path.encode("utf-8"), weights_path.encode("utf-8"), 0
+    weights_path = download_testdata(
+        "https://pjreddie.com/media/files/" + MODEL_NAME + ".weights" + "?raw=true",
+        MODEL_NAME + ".weights",
+        module="darknet",
     )
-    dshape = (env.BATCH, net.c, net.h, net.w)
-    dtype = "float32"
 
-    # Measure build start time
-    build_start = time.time()
-
-    # Start front end compilation
-    mod, params = relay.frontend.from_darknet(net, dtype=dtype, shape=dshape)
-
-    if target.device_name == "vta":
-        # Perform quantization in Relay
-        # Note: We set opt_level to 3 in order to fold batch norm
-        with tvm.transform.PassContext(opt_level=3):
-            with relay.quantize.qconfig(
-                global_scale=23.0,
-                skip_conv_layers=[0],
-                store_lowbit_output=True,
-                round_for_shift=True,
-            ):
-                mod = relay.quantize.quantize(mod, params=params)
-            # Perform graph packing and constant folding for VTA target
-            mod = graph_pack(
-                mod["main"],
-                env.BATCH,
-                env.BLOCK_OUT,
-                env.WGT_WIDTH,
-                start_name=pack_dict[MODEL_NAME][0],
-                stop_name=pack_dict[MODEL_NAME][1],
-                start_name_idx=pack_dict[MODEL_NAME][2],
-                stop_name_idx=pack_dict[MODEL_NAME][3],
-            )
+    if sys.platform in ["linux", "linux2"]:
+        darknet_lib_path = download_testdata(
+            REPO_URL + "lib/" + "libdarknet2.0.so" + "?raw=true", "libdarknet2.0.so", module="darknet"
+        )
+    elif sys.platform == "darwin":
+        darknet_lib_path = download_testdata(
+            REPO_URL + "lib_osx/" + "libdarknet_mac2.0.so" + "?raw=true",
+            "libdarknet_mac2.0.so",
+            module="darknet",
+        )
     else:
-        mod = mod["main"]
+        raise NotImplementedError("Darknet lib is not supported on {} platform".format(sys.platform))
 
+    ##################################################
+    # Download yolo categories and illustration front.
+    # ------------------------------------------------
+    coco_path = download_testdata(
+        REPO_URL + "data/" + "coco.names" + "?raw=true", "coco.names", module="data"
+    )
+    font_path = download_testdata(
+        REPO_URL + "data/" + "arial.ttf" + "?raw=true", "arial.ttf", module="data"
+    )
+    with open(coco_path) as f:
+        content = f.readlines()
+    names = [x.strip() for x in content]
 
-cpu = "./yolov3-tiny-arm-cpu.log"
-vta = "./yolov3-tiny.log"
-config = {'cpu':cpu, 'vta':vta}
-#parse_network(mod, {"cpu":"./cpu.json", "vta":"./vta.json"})
-net_conf = parse_network(mod, config)
-get_split = tvm._ffi.get_global_func("autotvm.feature.GetSplitConfig", allow_missing=False)
-conf = get_split(str(net_conf))
-print(conf)
+    ########################################
+    # Define the platform and model targets.
+    # --------------------------------------
+    # Execute on CPU vs. VTA, and define the model.
+
+    # Load VTA parameters from the 3rdparty/vta-hw/config/vta_config.json file
+    env = vta.get_env()
+    # Set ``device=arm_cpu`` to run inference on the CPU
+    # or ``device=vta`` to run inference on the FPGA.
+    device = "vta"
+    target = env.target if device == "vta" else env.target_vta_cpu
+
+    pack_dict = {
+        "yolov3-tiny": ["nn.max_pool2d", "cast", 4, 186],
+    }
+
+    # Name of Darknet model to compile
+    # The ``start_pack`` and ``stop_pack`` labels indicate where
+    # to start and end the graph packing relay pass: in other words
+    # where to start and finish offloading to VTA.
+    # the number 4 indicate the the ``start_pack`` index is 4, the
+    # number 186 indicate the ``stop_pack index`` is 186, by using
+    # name and index number, here we can located to correct place
+    # where to start/end when there are multiple ``nn.max_pool2d``
+    # or ``cast``, print(mod.astext(show_meta_data=False)) can help
+    # to find operator name and index information.
+    assert MODEL_NAME in pack_dict
+
+    #############################
+    # Obtain an execution remote.
+    # ---------------------------
+    # When target is 'pynq' or other FPGA backend, reconfigure FPGA and runtime.
+    # Otherwise, if target is 'sim', execute locally.
+
+    if env.TARGET not in ["sim", "tsim"]:
+        # Get remote from tracker node if environment variable is set.
+        # To set up the tracker, you'll need to follow the "Auto-tuning
+        # a convolutional network for VTA" tutorial.
+        tracker_host = os.environ.get("TVM_TRACKER_HOST", None)
+        tracker_port = os.environ.get("TVM_TRACKER_PORT", None)
+        # Otherwise if you have a device you want to program directly from
+        # the host, make sure you've set the variables below to the IP of
+        # your board.
+        device_host = os.environ.get("VTA_RPC_HOST", "192.168.2.99")
+        device_port = os.environ.get("VTA_RPC_PORT", "9091")
+        if not tracker_host or not tracker_port:
+            remote = rpc.connect(device_host, int(device_port))
+        else:
+            remote = autotvm.measure.request_remote(
+                env.TARGET, tracker_host, int(tracker_port), timeout=10000
+            )
+        # Reconfigure the JIT runtime and FPGA.
+        # You can program the FPGA with your own custom bitstream
+        # by passing the path to the bitstream file instead of None.
+        reconfig_start = time.time()
+        vta.reconfig_runtime(remote)
+        vta.program_fpga(remote, bitstream=None)
+        reconfig_time = time.time() - reconfig_start
+        print("Reconfigured FPGA and RPC runtime in {0:.2f}s!".format(reconfig_time))
+
+    # In simulation mode, host the RPC server locally.
+    else:
+        remote = rpc.LocalSession()
+
+    # Get execution context from remote
+    ctx = remote.ext_dev(0) if device == "vta" else remote.cpu(0)
+    #####################################
+    # Build the inference graph executor.
+    # -----------------------------------
+    # Using Darknet library load downloaded vision model and compile with Relay.
+    # The compilation steps are:
+    #
+    # 1. Front end translation from Darknet into Relay module.
+    # 2. Apply 8-bit quantization: here we skip the first conv layer,
+    #    and dense layer which will both be executed in fp32 on the CPU.
+    # 3. Perform graph packing to alter the data layout for tensorization.
+    # 4. Perform constant folding to reduce number of operators (e.g. eliminate batch norm multiply).
+    # 5. Perform relay build to object file.
+    # 6. Load the object file onto remote (FPGA device).
+    # 7. Generate graph executor, `m`.
+
+    # Load pre-configured AutoTVM schedules
+    with autotvm.tophub.context(target):
+        net = __darknetffi__.dlopen(darknet_lib_path).load_network(
+            cfg_path.encode("utf-8"), weights_path.encode("utf-8"), 0
+        )
+        dshape = (env.BATCH, net.c, net.h, net.w)
+        dtype = "float32"
+
+        # Measure build start time
+        build_start = time.time()
+
+        # Start front end compilation
+        mod, params = relay.frontend.from_darknet(net, dtype=dtype, shape=dshape)
+
+        if target.device_name == "vta":
+            # Perform quantization in Relay
+            # Note: We set opt_level to 3 in order to fold batch norm
+            with tvm.transform.PassContext(opt_level=3):
+                with relay.quantize.qconfig(
+                    global_scale=23.0,
+                    skip_conv_layers=[0],
+                    store_lowbit_output=True,
+                    round_for_shift=True,
+                ):
+                    mod = relay.quantize.quantize(mod, params=params)
+                # Perform graph packing and constant folding for VTA target
+                mod = graph_pack(
+                    mod["main"],
+                    env.BATCH,
+                    env.BLOCK_OUT,
+                    env.WGT_WIDTH,
+                    start_name=pack_dict[MODEL_NAME][0],
+                    stop_name=pack_dict[MODEL_NAME][1],
+                    start_name_idx=pack_dict[MODEL_NAME][2],
+                    stop_name_idx=pack_dict[MODEL_NAME][3],
+                )
+        else:
+            mod = mod["main"]
+    return mod
+
+def SplitConf():
+    cpu = "./yolov3-tiny-arm-cpu.log"
+    vta = "./yolov3-tiny.log"
+    config = {'cpu':cpu, 'vta':vta}
+    mod = GetModule()
+    #parse_network(mod, {"cpu":"./cpu.json", "vta":"./vta.json"})
+    net_conf = parse_network(mod, config)
+    get_split = tvm._ffi.get_global_func("autotvm.feature.GetSplitConfig", allow_missing=False)
+    conf = get_split(str(net_conf))
+    print(conf)
+
+def GraphSplit():
+    f = open("./output.json")
+    config  = json.load(f)
+#SplitConf()
+GraphSplit()
+
