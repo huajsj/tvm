@@ -62,7 +62,7 @@ from tvm.contrib import graph_executor, utils
 from tvm.contrib.download import download_testdata
 from vta.testing import simulator
 from vta.top import graph_pack
-from tvm.relay.analysis import parse_network, parse_layer_perf
+from tvm.relay.analysis import parse_network, parse_layer_perf, pipeline_graph
 import json
 # Make sure that TVM was compiled with RPC=1
 assert tvm.runtime.enabled("rpc")
@@ -233,6 +233,18 @@ def GetModule():
             mod = mod["main"]
     return mod
 
+def GraphSplit(conf):
+    f = open("./output.json")
+    config  = json.loads(conf)
+    config  = json.load(f)
+    split_conf = []
+    for conf in config[0]:
+        c_conf = {}
+        c_conf["op_name"] = conf['layer_info']["end"]["op_name"]
+        c_conf["op_index"] = conf['layer_info']["end"]["op_index"]
+        split_conf.append(c_conf)
+    return split_conf[:len(split_conf)-1]
+
 def SplitConf():
     cpu = "./yolov3-tiny-arm-cpu.log"
     vta = "./yolov3-tiny.log"
@@ -242,11 +254,10 @@ def SplitConf():
     net_conf = parse_network(mod, config)
     get_split = tvm._ffi.get_global_func("autotvm.feature.GetSplitConfig", allow_missing=False)
     conf = get_split(str(net_conf))
-    print(conf)
+    indices = GraphSplit(conf)
+    subs = pipeline_graph(mod, indices)
+    return subs
 
-def GraphSplit():
-    f = open("./output.json")
-    config  = json.load(f)
-#SplitConf()
-GraphSplit()
+subs = SplitConf()
+#GraphSplit("{}")
 

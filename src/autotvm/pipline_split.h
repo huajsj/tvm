@@ -56,7 +56,7 @@ struct LayerInfo {
   void Save(dmlc::JSONWriter* writer) const {
      writer->BeginObject();
      writer->WriteObjectKeyValue("op_index", op_index);
-     writer->WriteObjectKeyValue("network_index", op_index);
+     writer->WriteObjectKeyValue("network_index", network_index);
      writer->WriteObjectKeyValue("op_name", op_name);
      writer->EndObject();
   }

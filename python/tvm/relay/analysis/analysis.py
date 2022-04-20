@@ -536,6 +536,11 @@ def parse_network(expr, config):
 
             if isinstance(value, tvm.relay.expr.Call):
                 if isinstance(value.op, tvm.ir.Op):
+                    if value.op.name in operator_index_map:
+                        operator_index_map[value.op.name] = \
+                            operator_index_map[value.op.name] + 1
+                    else:
+                        operator_index_map[value.op.name] = 0
                     if str(value.op.name) == "nn.conv2d":
                         perf = get_op_perf(value, perf_data)
                         layer = "{{{}_{}, {}, {}}}".format(
@@ -545,11 +550,6 @@ def parse_network(expr, config):
                             str(value.args[1].checked_type.concrete_shape))
                         layer_perf = {}
                         layer_perf["op"] = f"{value.op.name}"
-                        if value.op.name in operator_index_map:
-                            operator_index_map[value.op.name] = \
-                                operator_index_map[value.op.name] + 1
-                        else:
-                            operator_index_map[value.op.name] = 0
                         layer_perf["op_index"] = operator_index_map[value.op.name]
                         layer_perf["network_index"] = index
                         layer_perf[f"perf"] = perf
@@ -616,7 +616,6 @@ def pipeline_graph(expr, indices):
 
         # If body not let, then reached end of the express
         if not isinstance(constant_expr.body, tvm.relay.expr.Let):
-            p.name
             return tvm.relay.expr.Let(constant_expr.var, constant_expr.value, expr)
 
         return tvm.relay.expr.Let(
@@ -640,6 +639,7 @@ def pipeline_graph(expr, indices):
         #     constant defined before current operator
 
         # Do the split work
+        nonlocal operator_index_map
         if isinstance(anf, tvm.relay.Function):
             return tvm.relay.Function(
                 anf.params,
@@ -662,11 +662,18 @@ def pipeline_graph(expr, indices):
 
             if isinstance(value, tvm.relay.expr.Call):
                 if isinstance(value.op, tvm.ir.Op):
+                    if value.op.name in operator_index_map:
+                        operator_index_map[value.op.name] = \
+                            operator_index_map[value.op.name] + 1
+                    else:
+                        operator_index_map[value.op.name] = 0
 
                     # if have expr a(b(c(d(e)))) and indexes are [1,2,3]
                     # then would get separate modules for a(b),c,d(e).
                     # the split area is a(b)[0,1] c[2,2] d(e)[2,3]
-                    if indices and operator_indx == indices[0]:
+                    split_operator_name = indices[0]["op_name"] if indices else ""
+                    split_operator_index = indices[0]["op_index"] if indices else ""
+                    if indices and operator_index_map[split_operator_name] >= split_operator_index:
                         indices.pop(0)
                         ann = _recursion(
                             anf.body, operator_indx, pipeline_mods, indices, constant_expr
@@ -692,7 +699,7 @@ def pipeline_graph(expr, indices):
             return anf
 
     pipeline_mods = []
-
+    operator_index_map = {}
     # operator count start from 0, then initial value get set into -1
     operator_indx = -1
     constant_expr = None
