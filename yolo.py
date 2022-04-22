@@ -63,9 +63,26 @@ from tvm.contrib.download import download_testdata
 from vta.testing import simulator
 from vta.top import graph_pack
 from tvm.relay.analysis import parse_network, parse_layer_perf, pipeline_graph
+from tvm.contrib import graph_executor, pipeline_executor
 import json
 # Make sure that TVM was compiled with RPC=1
 assert tvm.runtime.enabled("rpc")
+cpu_log = "./yolov3-tiny-arm-cpu.log"
+vta_log = "./yolov3-tiny.log"
+env = vta.get_env()
+
+def vta_build(mod, target, params=None, target_host=None, mod_name="default"):
+    target = env.target
+    with autotvm.apply_history_best(vta_log):
+        with relay.build_config(opt_level=3, disabled_pass={"AlterOpLayout"}):
+            with vta.build_config(debug_flag=0):
+                #libs = relay.build(mod, target=target, params=params, 
+                 #         target_host="llvm -mtriple=aarch64-linux-gnu", mod_name= "default")
+                libs = relay.build(
+                    mod, target=tvm.target.Target(target, host=env.target_host), params=params
+                )
+            print("")
+    return libs
 
 def GetModule():
     ##############################################################################
@@ -112,18 +129,6 @@ def GetModule():
         content = f.readlines()
     names = [x.strip() for x in content]
 
-    ########################################
-    # Define the platform and model targets.
-    # --------------------------------------
-    # Execute on CPU vs. VTA, and define the model.
-
-    # Load VTA parameters from the 3rdparty/vta-hw/config/vta_config.json file
-    env = vta.get_env()
-    # Set ``device=arm_cpu`` to run inference on the CPU
-    # or ``device=vta`` to run inference on the FPGA.
-    device = "vta"
-    target = env.target if device == "vta" else env.target_vta_cpu
-
     pack_dict = {
         "yolov3-tiny": ["nn.max_pool2d", "cast", 4, 186],
     }
@@ -140,103 +145,48 @@ def GetModule():
     # to find operator name and index information.
     assert MODEL_NAME in pack_dict
 
-    #############################
-    # Obtain an execution remote.
-    # ---------------------------
-    # When target is 'pynq' or other FPGA backend, reconfigure FPGA and runtime.
-    # Otherwise, if target is 'sim', execute locally.
-
-    if env.TARGET not in ["sim", "tsim"]:
-        # Get remote from tracker node if environment variable is set.
-        # To set up the tracker, you'll need to follow the "Auto-tuning
-        # a convolutional network for VTA" tutorial.
-        tracker_host = os.environ.get("TVM_TRACKER_HOST", None)
-        tracker_port = os.environ.get("TVM_TRACKER_PORT", None)
-        # Otherwise if you have a device you want to program directly from
-        # the host, make sure you've set the variables below to the IP of
-        # your board.
-        device_host = os.environ.get("VTA_RPC_HOST", "192.168.2.99")
-        device_port = os.environ.get("VTA_RPC_PORT", "9091")
-        if not tracker_host or not tracker_port:
-            remote = rpc.connect(device_host, int(device_port))
-        else:
-            remote = autotvm.measure.request_remote(
-                env.TARGET, tracker_host, int(tracker_port), timeout=10000
-            )
-        # Reconfigure the JIT runtime and FPGA.
-        # You can program the FPGA with your own custom bitstream
-        # by passing the path to the bitstream file instead of None.
-        reconfig_start = time.time()
-        vta.reconfig_runtime(remote)
-        vta.program_fpga(remote, bitstream=None)
-        reconfig_time = time.time() - reconfig_start
-        print("Reconfigured FPGA and RPC runtime in {0:.2f}s!".format(reconfig_time))
-
-    # In simulation mode, host the RPC server locally.
-    else:
-        remote = rpc.LocalSession()
-
-    # Get execution context from remote
-    ctx = remote.ext_dev(0) if device == "vta" else remote.cpu(0)
-    #####################################
-    # Build the inference graph executor.
-    # -----------------------------------
-    # Using Darknet library load downloaded vision model and compile with Relay.
-    # The compilation steps are:
-    #
-    # 1. Front end translation from Darknet into Relay module.
-    # 2. Apply 8-bit quantization: here we skip the first conv layer,
-    #    and dense layer which will both be executed in fp32 on the CPU.
-    # 3. Perform graph packing to alter the data layout for tensorization.
-    # 4. Perform constant folding to reduce number of operators (e.g. eliminate batch norm multiply).
-    # 5. Perform relay build to object file.
-    # 6. Load the object file onto remote (FPGA device).
-    # 7. Generate graph executor, `m`.
-
     # Load pre-configured AutoTVM schedules
-    with autotvm.tophub.context(target):
-        net = __darknetffi__.dlopen(darknet_lib_path).load_network(
-            cfg_path.encode("utf-8"), weights_path.encode("utf-8"), 0
+    #with autotvm.tophub.context(target):
+    net = __darknetffi__.dlopen(darknet_lib_path).load_network(
+        cfg_path.encode("utf-8"), weights_path.encode("utf-8"), 0
+    )
+    dshape = (1, net.c, net.h, net.w)
+    dtype = "float32"
+
+    # Measure build start time
+    build_start = time.time()
+
+    # Start front end compilation
+    mod, params = relay.frontend.from_darknet(net, dtype=dtype, shape=dshape)
+
+    # Perform quantization in Relay
+    # Note: We set opt_level to 3 in order to fold batch norm
+    with tvm.transform.PassContext(opt_level=3):
+        with relay.quantize.qconfig(
+            global_scale=23.0,
+            skip_conv_layers=[0],
+            store_lowbit_output=True,
+            round_for_shift=True,
+        ):
+            mod = relay.quantize.quantize(mod, params=params)
+        # Perform graph packing and constant folding for VTA target
+        mod = graph_pack(
+            mod["main"],
+            env.BATCH,
+            env.BLOCK_OUT,
+            env.WGT_WIDTH,
+            start_name=pack_dict[MODEL_NAME][0],
+            stop_name=pack_dict[MODEL_NAME][1],
+            start_name_idx=pack_dict[MODEL_NAME][2],
+            stop_name_idx=pack_dict[MODEL_NAME][3],
         )
-        dshape = (env.BATCH, net.c, net.h, net.w)
-        dtype = "float32"
-
-        # Measure build start time
-        build_start = time.time()
-
-        # Start front end compilation
-        mod, params = relay.frontend.from_darknet(net, dtype=dtype, shape=dshape)
-
-        if target.device_name == "vta":
-            # Perform quantization in Relay
-            # Note: We set opt_level to 3 in order to fold batch norm
-            with tvm.transform.PassContext(opt_level=3):
-                with relay.quantize.qconfig(
-                    global_scale=23.0,
-                    skip_conv_layers=[0],
-                    store_lowbit_output=True,
-                    round_for_shift=True,
-                ):
-                    mod = relay.quantize.quantize(mod, params=params)
-                # Perform graph packing and constant folding for VTA target
-                mod = graph_pack(
-                    mod["main"],
-                    env.BATCH,
-                    env.BLOCK_OUT,
-                    env.WGT_WIDTH,
-                    start_name=pack_dict[MODEL_NAME][0],
-                    stop_name=pack_dict[MODEL_NAME][1],
-                    start_name_idx=pack_dict[MODEL_NAME][2],
-                    stop_name_idx=pack_dict[MODEL_NAME][3],
-                )
-        else:
-            mod = mod["main"]
+    #vta_build(mod, env.target)
     return mod
 
 def GraphSplit(conf):
-    f = open("./output.json")
+    #f = open("./output.json")
+    #config  = json.load(f)
     config  = json.loads(conf)
-    config  = json.load(f)
     split_conf = []
     for conf in config[0]:
         c_conf = {}
@@ -246,18 +196,61 @@ def GraphSplit(conf):
     return split_conf[:len(split_conf)-1]
 
 def SplitConf():
-    cpu = "./yolov3-tiny-arm-cpu.log"
-    vta = "./yolov3-tiny.log"
-    config = {'cpu':cpu, 'vta':vta}
+    config = {'cpu':cpu_log, 'vta':vta_log}
     mod = GetModule()
-    #parse_network(mod, {"cpu":"./cpu.json", "vta":"./vta.json"})
+    # Get the operator performance information.
     net_conf = parse_network(mod, config)
+    # Get top N best split solution
     get_split = tvm._ffi.get_global_func("autotvm.feature.GetSplitConfig", allow_missing=False)
     conf = get_split(str(net_conf))
+    # Create the split configuration
     indices = GraphSplit(conf)
+    # Get the subgraph
     subs = pipeline_graph(mod, indices)
     return subs
 
-subs = SplitConf()
-#GraphSplit("{}")
 
+
+
+def arm_cpu_build(mod, target, params=None, target_host=None, mod_name="default"):
+    with autotvm.apply_history_best(cpu_log):
+        with relay.build_config(opt_level=3):
+            libs = relay.build(mod, target=target, params=params,
+                               target_host=target_host, mod_name= mod_name)
+    return libs
+
+def Compile(mods):
+    for sub in mods:
+        print(sub)
+    target = "llvm -mtriple=aarch64-linux-gnu"
+    libs = relay.build(mods[0], target= target)
+    pipe_config = pipeline_executor.PipelineConfig()
+    pipe_config[mods[0]].target = "llvm -keys=arm_cpu,cpu -device=arm_cpu -link-params=0 \
+                                   -mattr=+neon -model=ultra96 -mtriple=aarch64-linux-gnu"
+
+    pipe_config[mods[0]].dev = tvm.cpu(0)
+    pipe_config[mods[0]].cpu_affinity = "0"
+    pipe_config[mods[0]].build_func = arm_cpu_build
+
+    target = "ext_dev -keys=vta,cpu -device=vta -model=ultra96_1x16_i8w8a32_15_15_18_17"
+    host = "llvm -mtriple=aarch64-linux-gnu"
+    pipe_config[mods[1]].target = tvm.target.Target(target, host = host)
+    pipe_config[mods[1]].dev = tvm.ext_dev(0)
+    pipe_config[mods[1]].cpu_affinity = "0"
+    pipe_config[mods[1]].build_func = vta_build
+
+    pipe_config["input"]["data"].connect(pipe_config[mods[0]]["input"]["data"])
+    m2_input_name = "x_1546"
+    pipe_config[mods[0]]["output"][0].connect(pipe_config[mods[1]]["input"][m2_input_name])
+
+    libs = pipeline_executor.build(pipe_config)
+    '''
+    directory_path = tvm.contrib.utils.tempdir().temp_dir
+    # If the directory does not exist, create it.
+    if not os.path.exists(directory_path):
+        os.makedirs(directory_path)
+    config_file_name = pipeline_mod_factory.export_library(directory_path)
+    '''
+
+mods = SplitConf()
+Compile(mods)

@@ -97,7 +97,7 @@ def build(pipe_configs):
     string_config["input_connection"] = config["input_connection"]
     string_config["module_connection"] = module_string_config
 
-    return PipelineExecutorFactoryModule(libs, string_config)
+    return libs#PipelineExecutorFactoryModule(libs, string_config)
 
 
 class PipelineModule(object):
