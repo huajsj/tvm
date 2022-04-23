@@ -523,6 +523,7 @@ def parse_network(expr, config):
         return entry if isinstance(expr, tvm.relay.Function) else entry.body
 
     def _recursion(anf, index, operator_index_map, perf_data, perf_ret):
+        nonlocal data_list
         if isinstance(anf, tvm.relay.Function):
             return tvm.relay.Function(
                 anf.params,
@@ -555,6 +556,9 @@ def parse_network(expr, config):
                         layer_perf[f"perf"] = perf
                         print(layer_perf)
                         perf_ret.append(layer_perf)
+                        data_list.append({'op_name': value.op.name,
+                                          'shape':value.args[0].checked_type.concrete_shape,
+                                          'dtype':value.args[0].checked_type.dtype})
 
             index = index + 1
             return tvm.relay.expr.Let(
@@ -564,6 +568,8 @@ def parse_network(expr, config):
             )
         else:
             return anf
+    # This list of the data need a movement
+    data_list = []
     perf_list = parse_layer_perf(config)
     perf_data = load_perf(perf_list)
     # operator count start from 0, then initial value get set into -1
@@ -573,7 +579,7 @@ def parse_network(expr, config):
     operator_index_map = {}
     perf_ret = []
     ann = _recursion(anf, index, operator_index_map, perf_data, perf_ret)
-    return json.dumps(perf_ret)
+    return json.dumps(perf_ret), data_list
 
 """
 Split graph into a serial of sbgraph.

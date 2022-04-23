@@ -81,7 +81,13 @@ def vta_build(mod, target, params=None, target_host=None, mod_name="default"):
                 libs = relay.build(
                     mod, target=tvm.target.Target(target, host=env.target_host), params=params
                 )
-            print("")
+    return libs
+
+def arm_cpu_build(mod, target, params=None, target_host=None, mod_name="default"):
+    with autotvm.apply_history_best(cpu_log):
+        with relay.build_config(opt_level=3):
+            libs = relay.build(mod, target=target, params=params,
+                               target_host=target_host, mod_name= mod_name)
     return libs
 
 def GetModule():
@@ -199,7 +205,8 @@ def SplitConf():
     config = {'cpu':cpu_log, 'vta':vta_log}
     mod = GetModule()
     # Get the operator performance information.
-    net_conf = parse_network(mod, config)
+    net_conf, data_list = parse_network(mod, config)
+    print(data_list)
     # Get top N best split solution
     get_split = tvm._ffi.get_global_func("autotvm.feature.GetSplitConfig", allow_missing=False)
     conf = get_split(str(net_conf))
@@ -208,16 +215,6 @@ def SplitConf():
     # Get the subgraph
     subs = pipeline_graph(mod, indices)
     return subs
-
-
-
-
-def arm_cpu_build(mod, target, params=None, target_host=None, mod_name="default"):
-    with autotvm.apply_history_best(cpu_log):
-        with relay.build_config(opt_level=3):
-            libs = relay.build(mod, target=target, params=params,
-                               target_host=target_host, mod_name= mod_name)
-    return libs
 
 def Compile(mods):
     for sub in mods:
@@ -244,6 +241,8 @@ def Compile(mods):
     pipe_config[mods[0]]["output"][0].connect(pipe_config[mods[1]]["input"][m2_input_name])
 
     libs = pipeline_executor.build(pipe_config)
+    for i in range(0, len(libs)):
+        libs[i]["lib"].lib.export_library(f"./{i}.tar")
     '''
     directory_path = tvm.contrib.utils.tempdir().temp_dir
     # If the directory does not exist, create it.
