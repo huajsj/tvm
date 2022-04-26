@@ -240,9 +240,11 @@ def Compile(mods):
     m2_input_name = "x_1546"
     pipe_config[mods[0]]["output"][0].connect(pipe_config[mods[1]]["input"][m2_input_name])
 
-    libs = pipeline_executor.build(pipe_config)
-    for i in range(0, len(libs)):
-        libs[i]["lib"].lib.export_library(f"./{i}.tar")
+    #libs = pipeline_executor.build(pipe_config)
+    pipe_fac = pipeline_executor.build(pipe_config)
+    print("test")
+    #for i in range(0, len(libs)):
+    #    libs[i]["lib"].lib.export_library(f"./{i}.tar")
     '''
     directory_path = tvm.contrib.utils.tempdir().temp_dir
     # If the directory does not exist, create it.

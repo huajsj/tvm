@@ -97,7 +97,7 @@ def build(pipe_configs):
     string_config["input_connection"] = config["input_connection"]
     string_config["module_connection"] = module_string_config
 
-    return libs#PipelineExecutorFactoryModule(libs, string_config)
+    return PipelineExecutorFactoryModule(libs, string_config)
 
 
 class PipelineModule(object):
@@ -111,7 +111,7 @@ class PipelineModule(object):
 
     def __init__(self, module):
         if isinstance(module, PipelineExecutorFactoryModule):
-            self.module = module.module
+            self.module = module.create_pipeline_executor_module()
         else:
             self.module = module
         # Get the packed functions from the pipeline executor.
@@ -781,11 +781,18 @@ class PipelineExecutorFactoryModule(object):
     def __init__(self, pipeline_mods, mods_config):
         self.pipeline_mods = pipeline_mods
         self.mods_config = mods_config
-        graph_executors, config = self.graph_executor_create(pipeline_mods, mods_config)
+        self.module = None
+
+    def create_pipeline_executor_module(self):
+        if self.module:
+            raise RuntimeError("The pipeline executor module has been initialized.")
+
+        graph_executors, config = self.graph_executor_create(self.pipeline_mods, self.mods_config)
         self.pipeline_create = tvm._ffi.get_global_func(
             "tvm.pipeline_executor.create", allow_missing=False
         )
         self.module = self.pipeline_create(graph_executors, config)
+        return self.module
 
     def graph_executor_create(self, pipeline_mods, mod_config):
         """Create graph_executor list and return configuration as a json string.
