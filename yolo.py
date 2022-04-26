@@ -65,6 +65,7 @@ from vta.top import graph_pack
 from tvm.relay.analysis import parse_network, parse_layer_perf, pipeline_graph
 from tvm.contrib import graph_executor, pipeline_executor
 import json
+from tvm.contrib import cc as _cc, tar as _tar, utils as _utils, clang
 # Make sure that TVM was compiled with RPC=1
 assert tvm.runtime.enabled("rpc")
 cpu_log = "./yolov3-tiny-arm-cpu.log"
@@ -225,9 +226,11 @@ def Compile(mods):
     pipe_config[mods[0]].target = "llvm -keys=arm_cpu,cpu -device=arm_cpu -link-params=0 \
                                    -mattr=+neon -model=ultra96 -mtriple=aarch64-linux-gnu"
 
+    cross_create = _cc.cross_compiler("/scratch/llvm/bin/clang",["-target", "aarch64-linux-gnu"])
     pipe_config[mods[0]].dev = tvm.cpu(0)
     pipe_config[mods[0]].cpu_affinity = "0"
     pipe_config[mods[0]].build_func = arm_cpu_build
+    pipe_config[mods[0]].fcompile = cross_create
 
     target = "ext_dev -keys=vta,cpu -device=vta -model=ultra96_1x16_i8w8a32_15_15_18_17"
     host = "llvm -mtriple=aarch64-linux-gnu"
@@ -235,6 +238,7 @@ def Compile(mods):
     pipe_config[mods[1]].dev = tvm.ext_dev(0)
     pipe_config[mods[1]].cpu_affinity = "0"
     pipe_config[mods[1]].build_func = vta_build
+    pipe_config[mods[1]].fcompile = cross_create
 
     pipe_config["input"]["data"].connect(pipe_config[mods[0]]["input"]["data"])
     m2_input_name = "x_1546"
@@ -242,7 +246,8 @@ def Compile(mods):
 
     #libs = pipeline_executor.build(pipe_config)
     pipe_fac = pipeline_executor.build(pipe_config)
-    print("test")
+    export = pipe_fac.export_library("./export/")
+    print(export)
     #for i in range(0, len(libs)):
     #    libs[i]["lib"].lib.export_library(f"./{i}.tar")
     '''

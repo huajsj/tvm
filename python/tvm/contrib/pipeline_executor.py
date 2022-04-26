@@ -86,7 +86,7 @@ def build(pipe_configs):
         # Use "mod_idx" as the key to create a "module_connection" map which is not only
         # for the module index but also for the module connection used to build the pipeline.
         module_string_config[mod_idx] = pipe_config
-        libs[mod_idx] = {"lib": lib, "dev": dev}
+        libs[mod_idx] = {"lib": lib, "dev": dev, "fcompile": mod_config["fcompile"]}
 
     # Creating a text form configuration to record the "input_connection" and the
     # "module_connection" information. The "input_connection" is used to record the
@@ -508,6 +508,7 @@ class PipelineConfig(object):
             self.build_func = None
             self.params = None
             self.target = None
+            self.fcompile = None
             self.name = None
             self.dev = None
             self.cpu_affinity = ""
@@ -696,6 +697,7 @@ class PipelineConfig(object):
                 "build": module.build_func,
                 "params": module.params,
                 "target": module.target,
+                "fcompile": module.fcompile,
                 "dev": module.dev,
             }
 
@@ -853,15 +855,19 @@ class PipelineExecutorFactoryModule(object):
             mconfig["lib_name"] = "{}/lib{}.so".format(directory_path, lib_index)
             mconfig["json_name"] = "{}/json{}".format(directory_path, lib_index)
             mconfig["params_name"] = "{}/params{}".format(directory_path, lib_index)
+            lib_config = self.pipeline_mods[lib_index]
             mconfig["dev"] = "{},{}".format(
-                self.pipeline_mods[lib_index]["dev"].device_type,
-                self.pipeline_mods[lib_index]["dev"].device_id,
+                lib_config["dev"].device_type,
+                lib_config["dev"].device_id,
             )
+            fcompile = lib_config["fcompile"]
+            if not fcompile:
+                fcompile = False
 
             # Get the graph, lib, and parameters from GraphExecutorFactoryModule.
             lib = self.pipeline_mods[lib_index]["lib"]
             # Export the lib, graph, and parameters to disk.
-            lib.export_library(mconfig["lib_name"])
+            lib.export_library(mconfig["lib_name"], fcompile)
             with open(mconfig["json_name"], "w") as file_handle:
                 file_handle.write(lib.graph_json)
             with open(mconfig["params_name"], "wb") as file_handle:

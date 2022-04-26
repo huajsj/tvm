@@ -94,6 +94,7 @@ def get_manual_conf(mods, target):
         "build": None,
         "params": None,
         "target": target[0],
+        "fcompile": None,
         "dev": target[1],
     }
 
@@ -111,6 +112,7 @@ def get_manual_conf(mods, target):
         "build": None,
         "params": None,
         "target": "llvm",
+        "fcompile": None,
         "dev": tvm.cpu(0),
     }
 
@@ -126,6 +128,7 @@ def get_manual_conf(mods, target):
         "build": None,
         "params": None,
         "target": "llvm",
+        "fcompile": None,
         "dev": tvm.cpu(0),
     }
     return mod_config
