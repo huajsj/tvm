@@ -82,10 +82,23 @@ PackedFunc PipelineExecutor::GetFunction(const std::string& name,
   } else if (name == "get_execute_count") {
     return PackedFunc(
         [sptr_to_self, this](TVMArgs args, TVMRetValue* rv) { *rv = this->GetExecutionCount(); });
+  } else if (name == "get_data_move_perf") {
+    return PackedFunc(
+        [sptr_to_self, this](TVMArgs args, TVMRetValue* rv) {
+          if (String::CanConvertFrom(args[0])) {
+              *rv = this->PipeDataMovePerf(args[0].operator String());
+          } else {
+              LOG(FATAL) << "Function only support the input name value in the form of string";
+          }
+        });
   } else {
     LOG(FATAL) << "Unknown packed function: " << name;
     return PackedFunc();
   }
+}
+
+std::string PipelineExecutor::PipeDataMovePerf(std::string data) {
+  return pipeline_tune_.PipelineDataMoveTune(data, runtimes_);
 }
 
 /*!

@@ -36,6 +36,7 @@
 #include <vector>
 
 #include "pipeline_scheduler.h"
+#include "pipeline_tune.h"
 namespace tvm {
 namespace runtime {
 /*!
@@ -83,6 +84,7 @@ class TVM_DLL PipelineExecutor : public ModuleNode {
    * \return Returning a runtime module index.
    */
   int GetParamsGroupPipelineMap(const std::string& name);
+  std::string PipeDataMovePerf(std::string data);
   /*!
    * \brief Use the input name to set the input data of pipeline executor.
    * \param input_name The input name.
@@ -171,6 +173,7 @@ class TVM_DLL PipelineExecutor : public ModuleNode {
   }
 
  private:
+  PipelineTune pipeline_tune_;
   /*!\brief The class used to execute and schedule the pipeline logic.*/
   PipelineScheduler pipeline_scheduler_;
   /*!\brief The dependency information of each graph runtime module of the pipeline.*/

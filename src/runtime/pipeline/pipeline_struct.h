@@ -1072,6 +1072,11 @@ class BackendRuntime : public BasicRuntime {
     int index = this->GetInputIndex(name);
     SetInput(index, data_in);
   }
+  DLDeviceType GetDeviceType() {
+    NDArray&& data= get_input_(0);
+    auto dl = const_cast<DLTensor*>(data.operator->());
+    return dl->device.device_type;
+  }
   /*!\brief Getting the input data via the input index.*/
   NDArray GetInput(int index) const { return get_input_(index); }
   /*!\bief Getting the input data via the input name.*/
