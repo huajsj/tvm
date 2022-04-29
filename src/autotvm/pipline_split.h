@@ -60,6 +60,8 @@ struct LayerInfo {
      writer->WriteObjectKeyValue("op_name", op_name);
      writer->EndObject();
   }
+  std::vector<int> shape;
+  std::string data_type;
 };
 typedef struct DPItem_ {
     DPItem_() {};
@@ -165,14 +167,18 @@ class SubgraphSplit{
 
 class AutoTune {
  public:
-    AutoTune(dmlc::JSONReader& reader) {
+    AutoTune(dmlc::JSONReader& reader, dmlc::JSONReader& reader_data) {
       srand(time(NULL));
       this->LoadConfig(&reader);
+      this->LoadDataMoveConfig(&reader_data);
     }
+    std::string ShapeToString(std::vector<int>& shape, std::string dtype);
     int GetNetDepth() {return layer_map_.size();}
     void LoadConfig(dmlc::JSONReader* reader);
+    void LoadDataMoveConfig(dmlc::JSONReader* reader);
+    float GetCommuCost(DPItem& cur, DPItem& next);
     void GenerateGraph(int num);
-    static void GenerateBalance(int current_pipeline_index, 
+    void GenerateBalance(int current_pipeline_index, 
                          std::unordered_map<int, PERF> lperf,
                          int dev_num, 
                          int prev_pipeline_end_bound, 
@@ -186,6 +192,7 @@ class AutoTune {
     /*device weight*/
     PERF dev_={{CPU,1.0}, {GPU,0.20}, {VTA,0.3}};
     std::vector<std::pair<float, std::list<DPItem>>> perf_list;
+    std::unordered_map<std::string, std::unordered_map<std::string, float>> comu_cost;
  private:
     static float GetPerSum(DPItem di, std::unordered_map<int, PERF> lperf);
     

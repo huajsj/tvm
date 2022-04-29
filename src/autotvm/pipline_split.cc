@@ -33,6 +33,46 @@
 namespace tvm {
 namespace autotvm {
 
+void AutoTune::LoadDataMoveConfig(dmlc::JSONReader* reader) {
+    int index = 0;
+    reader->BeginArray();
+    while (reader->NextArrayItem()) {
+      reader->BeginObject();
+      std::string key, type;
+      std::vector<int> shape;
+      //std::unordered_map<std::string, float> perf_map;
+      std::unordered_map<std::string, float> perf_map;
+      while (reader->NextObjectItem(&key)) {
+        if (key == "shape") {
+          reader->Read(&shape);
+        } else if (key == "type") {
+          reader->Read(&type);
+        } else if (key == "perf") {
+          reader->BeginArray();
+          while (reader->NextArrayItem()) {
+            reader->BeginObject();
+            std::string dev;
+            float perf;
+            while (reader->NextObjectItem(&key)) {
+                if (key == "dev_from_to") {
+                    reader->Read(&dev);
+                } else if (key == "perf") {
+                    reader->Read(&perf);
+                }
+            }
+            perf_map[dev] = perf;
+            std::cout << "shape:" << "shape" << " type:" << type << " perf:" << dev << ":"<< perf;
+            std::cout << std::endl;
+          }
+        } else {
+          LOG(FATAL) << "do not support key " << key;
+        }
+      }
+      comu_cost[ShapeToString(shape, type)] = perf_map; 
+    }
+    return;
+}
+
 void AutoTune::LoadConfig(dmlc::JSONReader* reader) {
     int index = 0;
     reader->BeginArray();
@@ -102,6 +142,38 @@ void AutoTune::GenerateGraph(int num) {
         backend_map = std::vector<std::vector<DPItem>>(dev_.size(), std::vector<DPItem>(num, DPItem()));*/
     }
 
+std::string AutoTune::ShapeToString(std::vector<int>& shape, std::string dtype) {
+    std::ostringstream ostr;
+    for (auto x:shape) {
+      ostr << x << ",";
+    }
+    ostr << ":" << dtype;
+    return ostr.str();
+}
+
+float AutoTune::GetCommuCost(DPItem& cur, DPItem& next) {
+    DevType cur_dev_type = cur.dev_type, next_dev_type = next.dev_type;
+    auto shape = cur.end_layer.shape;
+    auto dtype = cur.end_layer.data_type;
+    auto device_from_to =
+      DPItem_::GetTypeString(cur_dev_type) + ":" + DPItem_::GetTypeString(next_dev_type);
+
+    auto shape_info = ShapeToString(shape, dtype);
+    auto data_move_map = comu_cost.find(shape_info);
+    if (data_move_map == comu_cost.end()) {
+      LOG(WARNING) << "not find the data" << shape_info;
+      return 0;
+    }
+    auto data_map = data_move_map->second;
+    auto perf = data_map.find(device_from_to);
+    if (perf == data_map.end()) {
+      LOG(WARNING) << "not find the data for the device pair" << device_from_to;
+      return 0;
+    }
+    
+    return perf->second;
+}
+
 void AutoTune::GenerateBalance(int current_pipeline_index, 
                          std::unordered_map<int, PERF> lperf,
                          int dev_num, 
@@ -113,11 +185,17 @@ void AutoTune::GenerateBalance(int current_pipeline_index,
         if (current_pipeline_index >= dev_num || prev_pipeline_end_bound >= network_depth - 1
             || available_dev.size() == 0)  {
             float perf = std::numeric_limits<float>::min();
-            for (auto x:sub_list) {
+            int len = sub_list.size();
+            for (auto cur = sub_list.begin(); cur != sub_list.end(); cur++) {
                 //std::cout << x ;
-                auto cur_perf =  GetPerSum(x, lperf);
-                x.perf = cur_perf;
-                perf = std::max(perf, GetPerSum(x, lperf));
+                auto next = std::next(cur);
+                auto commu_cost = 0;
+                if (next != sub_list.end()) {
+                  commu_cost = GetCommuCost(*cur, *next);
+                }
+                auto cur_perf =  GetPerSum(*cur, lperf) + commu_cost;
+                cur->perf = cur_perf;
+                perf = std::max(perf, cur_perf);
             }
             //std::cout << "  average perf is " << perf << std::endl;
             perf_list.push_back(std::make_pair(perf, sub_list));
@@ -184,20 +262,20 @@ float AutoTune::GetPerSum(DPItem di, std::unordered_map<int, PERF> lperf) {
         return ret;
     }
 
-String GetSplitConfig(const std::string& json) {
-  std::istringstream is(json);
-  dmlc::JSONReader reader(&is);
+String GetSplitConfig(const std::string& layer_json, const std::string& data_comu_json) {
+  std::istringstream is(layer_json), is_data_comu(data_comu_json);
+  dmlc::JSONReader reader(&is), reader_data(&is_data_comu);
   std::list<DPItem> list;
-  AutoTune at(reader);
+  AutoTune at(reader, reader_data);
   int net_depth = at.GetNetDepth();
   std::vector<DevType> available_dev {CPU, VTA};
-  AutoTune::GenerateBalance(0, at.layer_perf_,available_dev.size(), -1,
+  at.GenerateBalance(0, at.layer_perf_,available_dev.size(), -1,
                               {CPU, VTA}, net_depth, list, at.perf_list);
   return at.FormatBest();
 }
 TVM_REGISTER_GLOBAL("autotvm.feature.GetSplitConfig")
     .set_body([](TVMArgs args, TVMRetValue* ret) {
-        *ret = GetSplitConfig(args[0]);
+        *ret = GetSplitConfig(args[0], args[1]);
     });
 }  // namespace autotvm
 }  // namespace tvm

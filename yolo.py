@@ -208,9 +208,15 @@ def SplitConf():
     # Get the operator performance information.
     net_conf, data_list = parse_network(mod, config)
     print(data_list)
+    #TODO() tune the operator in data_list
+    #fake
+    data_comu = '[{"shape":[1,3, 224, 224], "type":"float32", "perf": \
+                 [{"dev_from_to":"CPU:VTA", "perf": 0.01}] } \
+                ]'
+    print(data_comu)
     # Get top N best split solution
     get_split = tvm._ffi.get_global_func("autotvm.feature.GetSplitConfig", allow_missing=False)
-    conf = get_split(str(net_conf))
+    conf = get_split(str(net_conf), data_comu)
     # Create the split configuration
     indices = GraphSplit(conf)
     # Get the subgraph
