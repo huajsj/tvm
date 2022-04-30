@@ -210,7 +210,7 @@ def SplitConf():
     print(data_list)
     #TODO() tune the operator in data_list
     #fake
-    data_comu = '[{"shape":[1,3, 224, 224], "type":"float32", "perf": \
+    data_comu = '[{"op_name":"nn.conv2d", "op_index":0, "perf": \
                  [{"dev_from_to":"CPU:VTA", "perf": 0.01}] } \
                 ]'
     print(data_comu)

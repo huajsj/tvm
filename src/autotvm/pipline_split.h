@@ -60,8 +60,6 @@ struct LayerInfo {
      writer->WriteObjectKeyValue("op_name", op_name);
      writer->EndObject();
   }
-  std::vector<int> shape;
-  std::string data_type;
 };
 typedef struct DPItem_ {
     DPItem_() {};
@@ -172,7 +170,7 @@ class AutoTune {
       this->LoadConfig(&reader);
       this->LoadDataMoveConfig(&reader_data);
     }
-    std::string ShapeToString(std::vector<int>& shape, std::string dtype);
+    std::string OperatorUnifyID(std::string op_name, int op_index);
     int GetNetDepth() {return layer_map_.size();}
     void LoadConfig(dmlc::JSONReader* reader);
     void LoadDataMoveConfig(dmlc::JSONReader* reader);

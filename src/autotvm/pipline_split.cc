@@ -38,15 +38,15 @@ void AutoTune::LoadDataMoveConfig(dmlc::JSONReader* reader) {
     reader->BeginArray();
     while (reader->NextArrayItem()) {
       reader->BeginObject();
-      std::string key, type;
-      std::vector<int> shape;
+      std::string key, op_name;
+      int op_index;
       //std::unordered_map<std::string, float> perf_map;
       std::unordered_map<std::string, float> perf_map;
       while (reader->NextObjectItem(&key)) {
-        if (key == "shape") {
-          reader->Read(&shape);
-        } else if (key == "type") {
-          reader->Read(&type);
+        if (key == "op_name") {
+          reader->Read(&op_name);
+        } else if (key == "op_index") {
+          reader->Read(&op_index);
         } else if (key == "perf") {
           reader->BeginArray();
           while (reader->NextArrayItem()) {
@@ -61,14 +61,15 @@ void AutoTune::LoadDataMoveConfig(dmlc::JSONReader* reader) {
                 }
             }
             perf_map[dev] = perf;
-            std::cout << "shape:" << "shape" << " type:" << type << " perf:" << dev << ":"<< perf;
+            std::cout << "op:" << op_name << " op_index:" << op_index
+                      << " perf:" << dev << ":"<< perf;
             std::cout << std::endl;
           }
         } else {
           LOG(FATAL) << "do not support key " << key;
         }
       }
-      comu_cost[ShapeToString(shape, type)] = perf_map; 
+      comu_cost[OperatorUnifyID(op_name, op_index)] = perf_map; 
     }
     return;
 }
@@ -142,26 +143,25 @@ void AutoTune::GenerateGraph(int num) {
         backend_map = std::vector<std::vector<DPItem>>(dev_.size(), std::vector<DPItem>(num, DPItem()));*/
     }
 
-std::string AutoTune::ShapeToString(std::vector<int>& shape, std::string dtype) {
+std::string AutoTune::OperatorUnifyID(std::string op_name, int op_index) {
     std::ostringstream ostr;
-    for (auto x:shape) {
-      ostr << x << ",";
-    }
-    ostr << ":" << dtype;
+    ostr << op_name << "_" << op_index;
     return ostr.str();
 }
 
 float AutoTune::GetCommuCost(DPItem& cur, DPItem& next) {
+    cur.SetLayerInfo(layer_map_);
+    next.SetLayerInfo(layer_map_);
     DevType cur_dev_type = cur.dev_type, next_dev_type = next.dev_type;
-    auto shape = cur.end_layer.shape;
-    auto dtype = cur.end_layer.data_type;
+    auto op_name = cur.end_layer.op_name;
+    auto op_index = cur.end_layer.op_index;
     auto device_from_to =
       DPItem_::GetTypeString(cur_dev_type) + ":" + DPItem_::GetTypeString(next_dev_type);
 
-    auto shape_info = ShapeToString(shape, dtype);
-    auto data_move_map = comu_cost.find(shape_info);
+    auto op_id = OperatorUnifyID(op_name, op_index);
+    auto data_move_map = comu_cost.find(op_id);
     if (data_move_map == comu_cost.end()) {
-      LOG(WARNING) << "not find the data" << shape_info;
+      LOG(WARNING) << "not find the data of " << op_id;
       return 0;
     }
     auto data_map = data_move_map->second;

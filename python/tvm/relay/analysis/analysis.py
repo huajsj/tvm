@@ -542,6 +542,7 @@ def parse_network(expr, config):
                             operator_index_map[value.op.name] + 1
                     else:
                         operator_index_map[value.op.name] = 0
+                    op_index = operator_index_map[value.op.name]
                     if str(value.op.name) == "nn.conv2d":
                         perf = get_op_perf(value, perf_data)
                         layer = "{{{}_{}, {}, {}}}".format(
@@ -551,12 +552,14 @@ def parse_network(expr, config):
                             str(value.args[1].checked_type.concrete_shape))
                         layer_perf = {}
                         layer_perf["op"] = f"{value.op.name}"
-                        layer_perf["op_index"] = operator_index_map[value.op.name]
+                        layer_perf["op_index"] = op_index
                         layer_perf["network_index"] = index
                         layer_perf[f"perf"] = perf
                         print(layer_perf)
                         perf_ret.append(layer_perf)
+
                         data_list.append({'op_name': value.op.name,
+                                          'op_index':op_index,
                                           'shape':value.args[0].checked_type.concrete_shape,
                                           'dtype':value.args[0].checked_type.dtype})
 
