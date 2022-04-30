@@ -974,6 +974,20 @@ class BackendRuntime : public BasicRuntime {
     }
     StopPipeline();
   }
+  DLDataType GetDataType(std::string dtype) {
+    //TODO
+    return {kDLFloat, 32, 1};
+  }
+  NDArray CreateTuneData(std::vector<int64_t> shape, std::string dtype_string) {
+    auto device = GetDeviceType();
+    auto dtype = GetDataType(dtype_string);
+    auto ndarray = NDArray::Empty(shape, dtype, device);
+    ndarray.CreateView(shape, dtype);
+    return ndarray;
+  }
+  float CopyPerfMeasure(NDArray& data) {
+    return 0.0;
+  }
   /*!
    *\brief Creating a parent notification.
    *\param input_index The input index of the 'current runtime'.

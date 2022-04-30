@@ -39,8 +39,11 @@ std::string PipelineTune::PipelineDataMoveTune(
       std::cout << "from " << " i  to " << j <<std::endl;
       for (auto data:datas_) {
         //Get data copy performance.
-        //auto data_source = runtimes[0]->CreateTuneData();
-        //auto perf = runtimes[j]->CopyTest(data_source);
+        auto shape = GetShapeFromString(data[0]);
+        auto type = data[1];
+
+        auto&& data_source = runtimes[0]->CreateTuneData(shape, type);
+        auto perf = runtimes[j]->CopyPerfMeasure(data_source);
       }
     }
     swap(runtimes[i], runtimes[0]);
