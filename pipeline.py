@@ -46,9 +46,9 @@ from matplotlib import pyplot as plt
 
 from tvm.contrib import graph_executor, pipeline_executor
 import time
-loop = 1000
+loop = 1
 do_pipeline_runtime = False
-pipeline_sequence = False
+pipeline_sequence = True
 sequence_use_8 = False
 do_cuda = False
 do_remote = False
@@ -59,7 +59,9 @@ model_name = 'resnet18_v1'
 #block = get_model("resnet152_v1", pretrained=True)
 #block = get_model("vgg19", pretrained=True)
 block = get_model(model_name, pretrained=True)
-model_info = {"resnet18_v1":{'split_pos':38, 'input_name':'x_74',},
+#model_info = {"resnet18_v1":{'split_pos':38, 'input_name':'x_74',},
+model_info = {"resnet18_v1":{'split_pos':{"op_name":"nn.relu", "op_index":7},
+                            'input_name':'x_74',},
 #model_info = {"resnet18_v1":{'split_pos':43, 'input_name':'x_93',},
               "vgg19":{'split_pos':22, 'input_name':'x_36'},}
 split_info = model_info[model_name]
@@ -156,8 +158,8 @@ def pipe_test(mods, img):
 
 
     pipe_config["input"]["data"].connect(pipe_config[mod1]["input"]["data"])
-    pipe_config["input"]["x_83"].connect(pipe_config[mod2]["input"]["x_83"])
-    pipe_config[mod1]["output"][0].connect(pipe_config[mod2]["input"][split_info['input_name']])
+    pipe_config[mod1]["output"][0].connect(pipe_config[mod2]["input"]['data_n_0'])
+    pipe_config[mod1]["output"][1].connect(pipe_config[mod2]["input"]['data_n_1'])
     pipe_config[mod2]["output"]["0"].connect(pipe_config["output"][0])
     mconfig = pipe_config.get_config()
     log_file = "/scratch/hj/tvm-auto-ml/tvm-automl/mxnet_graph_opt.log.8"
@@ -172,22 +174,15 @@ def pipe_test(mods, img):
         else:
             cpu_list = ['16','0','1','2','3','4','5','6','7','8','9','10','11','12','13','14','15']
             config_threadpool(-3, 17, cpu_list)
-    first_data = \
-    [tvm.nd.array(np.random.uniform(size=(1, 3, 224, 224)).astype('float32'), tvm.cpu(0)) \
-    for i in range(0,15)]
-    second_data = \
-    [tvm.nd.array(np.random.uniform(size=(1, 128, 28, 28)).astype('float32'), tvm.cpu(0)) \
-    for i in range(0,15)]
     t1 = time.time()
     
     for i in range(0, loop):
         if not pipeline_sequence:
-            pipeline_module.set_input("data", first_data[i%15])#img)
-            pipeline_module.set_input("x_83", second_data[i%15])
+            pipeline_module.set_input("data", img)
+            #pipeline_module.set_input("x_83", second_data[i%15])
             pipeline_module.run(0)
         else:
             #pipeline_module.set_input("data", img)
-            pipeline_module.set_input("data", img)
             pipeline_module.set_input("data", img)
             pipeline_module.run(1)
             outputs = pipeline_module.get_output()
@@ -251,8 +246,8 @@ def local_run(func, name, x, remote_do = False):
 
 def normal_test(func, mods, x):
     dtype = "float32"
-    '''
     tvm_output = local_run(mods[0], 'data', tvm.nd.array(x.astype(dtype)))
+    '''
     tvm_output = local_run(mods[1], split_info['input_name'], tvm_output)
 
     tvm_output = local_run(mods[0], 'data', tvm.nd.array(x.astype(dtype)))

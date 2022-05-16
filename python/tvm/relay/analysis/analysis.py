@@ -446,6 +446,8 @@ def pipeline_graph(expr, indices, params):
     -------
     ret : Array[tvm.relay.IRModule]
     """
+    def get_dep_var(sub_var_dep):
+        return [var for var, _ in sub_var_dep[len(sub_var_dep) - 1]["ref_nodes"].items()]
 
     def run_opt_pass(expr, opt_pass):
         """Exectue a relay pass"""
@@ -456,12 +458,39 @@ def pipeline_graph(expr, indices, params):
         entry = mod["main"]
         return entry if isinstance(expr, tvm.relay.Function) else entry.body
 
-    def _operator_idx_inc(expr, operator_current_idx):
+    def op_idx_inc(expr, operator_current_idx):
         """Increase operator index"""
         if not isinstance(expr, tvm.relay.expr.Constant):
             operator_current_idx = operator_current_idx + 1
 
         return operator_current_idx
+
+    def parse_dependency(value, snode_dep, new_input_idx):
+        new_args = []
+        need_update = False
+        for var in value.args:
+            is_free_var = False
+            for i in range(0, len(snode_dep) - 1):
+                dep = snode_dep[i]
+                if var in dep["nodes"]:
+                    # Mark the previous subgraph node as a dependency of this subgraph node
+                    dep["nodes"][var] = dep["nodes"][var] + 1
+                    dep["ref_nodes"][var] = dep["nodes"][var]
+                    # The var of this call is a free_var
+                    is_free_var = True
+            # if the var of this call is free_var, recreate it and give it a fixed input name.
+            if is_free_var:
+                need_update = True
+                new_args.append(relay.var(f"data_n_{new_input_idx}", var.checked_type))
+                new_input_idx = new_input_idx + 1
+            else:
+                new_args.append(var)
+        # if the call have a free_var recreate it
+        if need_update:
+            value = tvm.relay.expr.Call(value.op, new_args, value.attrs,
+                                      value.type_args, value.span)
+        return value, snode_dep, new_input_idx
+
 
     def merge_constant_expr(constant_expr, expr):
         # merge constant express with a express
@@ -480,14 +509,14 @@ def pipeline_graph(expr, indices, params):
             constant_expr.var, constant_expr.value, merge_constant_expr(constant_expr.body, expr)
         )
 
-    def _recursion(anf, operator_indx, pipeline_mods, indices, constant_expr):
+    def _recursion(anf, operator_idx, pipeline_mods, indices, constant_expr, snode_dep):
         # Enumrate all operator of compute graph then split the compute graph
         # into a group subgraph.
         # Parameters
         # ----------
         # anf:
         #     ANF format expression
-        # operator_indx:
+        # operator_idx:
         #     current operator indice
         # pipeline_mods:
         #     the subgraph list get storage in this variable
@@ -497,17 +526,21 @@ def pipeline_graph(expr, indices, params):
         #     constant defined before current operator
 
         # Do the split work
+        nonlocal operator_index_map
+        nonlocal new_input_idx
+        cur_node_dep = snode_dep[len(snode_dep)-1]
         if isinstance(anf, tvm.relay.Function):
             return tvm.relay.Function(
                 anf.params,
-                _recursion(anf.body, operator_indx, pipeline_mods, indices, constant_expr),
+                _recursion(anf.body, operator_idx, pipeline_mods, indices,
+                           constant_expr, snode_dep),
                 anf.ret_type,
                 anf.type_params,
                 anf.attrs,
             )
         if isinstance(anf, tvm.relay.expr.Let):
             value = anf.value
-            operator_indx = _operator_idx_inc(value, operator_indx)
+            operator_idx = op_idx_inc(value, operator_idx)
 
             # record constan expr to make sure all sugraph can find correct
             # constant.
@@ -518,17 +551,34 @@ def pipeline_graph(expr, indices, params):
                     constant_expr = tvm.relay.expr.Let(anf.var, value, constant_expr)
 
             if isinstance(value, tvm.relay.expr.Call):
+                new_args = []
+                # build current var list
+                cur_node_dep["nodes"][anf.var] = 0
+                # check if in current subgraph there is any previous graph node dep
+                value, snode_dep, new_input_idx = parse_dependency(value, snode_dep, new_input_idx)
                 if isinstance(value.op, tvm.ir.Op):
+                    if value.op.name in operator_index_map:
+                        operator_index_map[value.op.name] = operator_index_map[value.op.name] + 1
+                    else:
+                        operator_index_map[value.op.name] = 0
 
                     # if have expr a(b(c(d(e)))) and indexes are [1,2,3]
                     # then would get separate modules for a(b),c,d(e).
                     # the split area is a(b)[0,1] c[2,2] d(e)[2,3]
-                    if indices and operator_indx == indices[0]:
+                    split_operator_name = indices[0]["op_name"] if indices else ""
+                    split_operator_index = indices[0]["op_index"] if indices else ""
+                    if (indices and split_operator_name in operator_index_map and
+                       operator_index_map[split_operator_name] >= split_operator_index):
                         indices.pop(0)
+                        snode_dep.append({"nodes":{},"ref_nodes":{}})
                         ann = _recursion(
-                            anf.body, operator_indx, pipeline_mods, indices, constant_expr
+                            anf.body, operator_idx, pipeline_mods, indices,
+                            constant_expr, snode_dep
                         )
-
+                        snode_dep.pop()
+                        dep_vars = get_dep_var(subgraph_node_dependency)
+                        # Assembly the output to support a module have 1+ output
+                        body = relay.Tuple(dep_vars) if len(dep_vars) > 1 else anf.var
                         # when current subgraph use previous subgraph constant,
                         # such constant may become free varaible due to the constant
                         # not exist, merge the previous constant with current subgraph
@@ -539,25 +589,33 @@ def pipeline_graph(expr, indices, params):
                         ann = run_opt_pass(ann, transform.ToGraphNormalForm())
                         mod = tvm.IRModule.from_expr(ann)
                         pipeline_mods.insert(0, mod)
-                        return tvm.relay.expr.Let(anf.var, value, anf.var)
+
+                        # Return the last node of the current subgraph.
+                        return tvm.relay.expr.Let(anf.var, value, body)
             return tvm.relay.expr.Let(
                 anf.var,
                 value,
-                _recursion(anf.body, operator_indx, pipeline_mods, indices, constant_expr),
+                _recursion(anf.body, operator_idx, pipeline_mods, indices,constant_expr, snode_dep),
             )
         else:
             return anf
 
+    subgraph_node_dependency = [{"nodes":{},"ref_nodes":{}}]
     pipeline_mods = []
-
-    expr = relay.build_module.bind_params_by_name(expr, params)
+    operator_index_map = {}
     # operator count start from 0, then initial value get set into -1
-    operator_indx = -1
+    operator_idx = -1
+    # the splitting of graph will generate new subgraph with new input, this index is used
+    # to generate the name of new input.
+    new_input_idx = 0
     constant_expr = None
     subgraph_indices = indices.copy()
     anf = run_opt_pass(expr, transform.ToANormalForm())
     anf = run_opt_pass(anf, transform.InferType())
-    ann = _recursion(anf, operator_indx, pipeline_mods, subgraph_indices, constant_expr)
+    ann = _recursion(anf, operator_idx, pipeline_mods,
+                     subgraph_indices, constant_expr, subgraph_node_dependency)
+    # Get all vars should be a output
+    dep_vars = get_dep_var(subgraph_node_dependency)
     ann = run_opt_pass(ann.body, transform.ToGraphNormalForm())
     mod = tvm.IRModule.from_expr(ann)
     pipeline_mods.insert(0, mod)
