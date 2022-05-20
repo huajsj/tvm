@@ -30,7 +30,7 @@ from tvm import relay, autotvm
 import numpy as np
 import threading
 from tvm._ffi import get_global_func
-from tvm.relay.analysis import pipeline_graph
+from tests.python.relay.test_pipeline_executor import graph_split
 from tvm.contrib import utils
 from tvm import rpc
 
@@ -44,7 +44,7 @@ from mxnet.gluon.model_zoo.vision import get_model
 from PIL import Image
 from matplotlib import pyplot as plt
 
-from tvm.contrib import graph_executor, pipeline_executor
+from tvm.contrib import graph_executor, pipeline_executor, pipeline_executor_build
 import time
 loop = 1000
 do_pipeline_runtime = True
@@ -117,7 +117,7 @@ def get_network(x):
     func = relay.Function(func.params, relay.nn.softmax(func.body), None, func.type_params,
                                                         func.attrs)
     pl = [split_info['split_pos']]
-    mods = pipeline_graph(func, pl, params)
+    mods = graph_split(func, pl, params)
     return func, mods, params
 
 if local_demo:
@@ -141,7 +141,7 @@ def remote_build(mod, target, params=None, target_host=None, mod_name="default")
 
 def pipe_test(mods, img):
     mod1, mod2 = mods[0], mods[1]
-    pipe_config = pipeline_executor.PipelineConfig()
+    pipe_config = pipeline_executor_build.PipelineConfig()
     pipe_config[mod1].target = "cuda" if do_cuda else "llvm"
     pipe_config[mod1].dev = tvm.cuda(0) if do_cuda else tvm.cpu(0)
     if not do_remote:
@@ -165,7 +165,7 @@ def pipe_test(mods, img):
     log_file = "/scratch/hj/tvm-auto-ml/tvm-automl/mxnet_graph_opt.log.8"
     with autotvm.apply_history_best(log_file):
         with tvm.transform.PassContext(opt_level=3):
-            pipeline_mod_factory = pipeline_executor.build(pipe_config)
+            pipeline_mod_factory = pipeline_executor_build.build(pipe_config)
     pipeline_module = pipeline_executor.PipelineModule(pipeline_mod_factory)
     if pipeline_sequence:
         if sequence_use_8:
@@ -179,11 +179,11 @@ def pipe_test(mods, img):
         if not pipeline_sequence:
             pipeline_module.set_input("data", img)
             #pipeline_module.set_input("x_83", second_data[i%15])
-            pipeline_module.run(0)
+            pipeline_module.run()
         else:
             #pipeline_module.set_input("data", img)
             pipeline_module.set_input("data", img)
-            pipeline_module.run(1)
+            pipeline_module.run(0)
             outputs = pipeline_module.get_output()
     
     if not pipeline_sequence:
@@ -248,7 +248,7 @@ def local_run(func, name, x, remote_do = False):
 
 def normal_test(func, mods, x):
     dtype = "float32"
-    tvm_output = local_run(mods[0], 'data', tvm.nd.array(x.astype(dtype)))
+    tvm_output = local_run(mods[0], 'data', x)
     '''
     tvm_output = local_run(mods[1], split_info['input_name'], tvm_output)
 
@@ -264,6 +264,7 @@ def normal_test(func, mods, x):
 
 
 x, synset = get_image()
+x = tvm.nd.array(x.astype("float32"))
 mod, mods, params = get_network(x)
 print("x", x.shape)
 if do_pipeline_runtime:
