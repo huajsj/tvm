@@ -610,6 +610,7 @@ def pipeline_graph(expr, indices, params):
     new_input_idx = 0
     constant_expr = None
     subgraph_indices = indices.copy()
+    expr = build_module.bind_params_by_name(expr, params)
     anf = run_opt_pass(expr, transform.ToANormalForm())
     anf = run_opt_pass(anf, transform.InferType())
     ann = _recursion(anf, operator_idx, pipeline_mods,

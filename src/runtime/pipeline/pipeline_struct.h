@@ -1119,7 +1119,18 @@ class BackendRuntime : public BasicRuntime {
   /*!\bief Getting the input data via the input name.*/
   int GetInputIndex(const std::string& name) { return get_input_index_(name); }
   /*!\brief Using the output index to get the module output.*/
-  NDArray GetOutput(int index) { return get_output_(index); }
+  NDArray GetOutput(int index) {
+    /*
+    std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
+    auto output = get_output_(index); 
+    std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
+    std::cout << runtime_idx_ << "get output " << index << " "
+                << std::chrono::duration_cast<std::chrono::milliseconds>( end - begin ).count()
+                << " milliseconds" << std::endl;
+    return output;
+   //*/
+    return get_output_(index);
+  }
   /*!\brief Running the runtime.*/
   void Run() {
     ///*

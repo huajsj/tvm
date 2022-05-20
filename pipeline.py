@@ -46,9 +46,9 @@ from matplotlib import pyplot as plt
 
 from tvm.contrib import graph_executor, pipeline_executor
 import time
-loop = 1
-do_pipeline_runtime = False
-pipeline_sequence = True
+loop = 1000
+do_pipeline_runtime = True
+pipeline_sequence = False
 sequence_use_8 = False
 do_cuda = False
 do_remote = False
@@ -175,7 +175,6 @@ def pipe_test(mods, img):
             cpu_list = ['16','0','1','2','3','4','5','6','7','8','9','10','11','12','13','14','15']
             config_threadpool(-3, 17, cpu_list)
     t1 = time.time()
-    
     for i in range(0, loop):
         if not pipeline_sequence:
             pipeline_module.set_input("data", img)
@@ -191,7 +190,10 @@ def pipe_test(mods, img):
         num = 0
         while num < loop:
             while len(outputs := pipeline_module.get_output()) == 0:
-                time.sleep(0.011)
+                if loop - num > 10:
+                    time.sleep(0.1)
+                else:
+                    time.sleep(0.001)
             num = num + 1
 
     t2 = time.time()
