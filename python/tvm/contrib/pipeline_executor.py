@@ -50,7 +50,6 @@ class PipelineModule(object):
         # Get the packed functions from the pipeline executor.
         self._get_params_group_pipeline_map = self.module["get_params_group_pipeline_map"]
         self._run = self.module["run"]
-        self._reset = self.module["reset"]
         self._set_param = self.module["set_param"]
         self._set_input = self.module["set_input"]
         self._get_input = self.module["get_input"]

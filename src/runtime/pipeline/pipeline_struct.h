@@ -226,11 +226,10 @@ class QueueData {
       } else {
         std::cout << "from len is " << fromLen << "  to len is " <<  toLen << std::endl;
         std::cout << "from dev" << from->device.device_type << "  to dev "
-                  <<  device_type_ << std::endl;
+                  /*<<  device_type_ */<< std::endl;
         LOG(FATAL) << "The 'from' data is not matched with the  'data_'.";
       }
     }
-    */
     if (fromLen != toLen) {
         if (data_) {
           TVMArrayFree(data_);
