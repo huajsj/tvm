@@ -262,6 +262,8 @@ def normal_test(func, mods, x):
     top1 = np.argmax(tvm_output.numpy()[0])
     print("TVM Single Full Graph prediction top-1:", top1, synset[top1])
 
+import logging
+logging.basicConfig(level=logging.DEBUG) 
 
 x, synset = get_image()
 x = tvm.nd.array(x.astype("float32"))
