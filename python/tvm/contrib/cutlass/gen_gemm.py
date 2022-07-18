@@ -133,6 +133,7 @@ def enumerate_gemm_operators(
 
 # TODO(masahi): A sensible way to pick reasonable default kernels
 DEFAULT_KERNELS = {
+    61: {}
     75: {
         ("float16", "float16"): "cutlass_tensorop_h1688gemm_128x64_32x2_tn_align1",
         ("float16", "float32"): "cutlass_tensorop_s1688gemm_f16_64x64_32x2_tn_align1",

@@ -28,6 +28,7 @@ from tvm.contrib.cutlass import (
     num_cutlass_partitions,
     finalize_modules,
     finalize_modules_vm,
+    get_cuda_sm_arch,
 )
 import tvm.testing
 

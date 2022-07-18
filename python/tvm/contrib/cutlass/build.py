@@ -29,6 +29,9 @@ from .library import ConvKind
 
 logger = logging.getLogger("cutlass")
 
+def get_cuda_sm_arch():
+    return int(tvm.target.Target("cuda").arch.split("_")[1])
+
 
 def has_cutlass():
     """Returns true if the CUTLASS custom codegen is available"""
