@@ -18,7 +18,7 @@
  */
 
 /*!
- * \file src/relay/backend/contrib/dnnl/codegen.cc
+ * \file src/relay/backend/contrib/zendnn/codegen.cc
  * \brief Implementation of ZENDNN codegen APIs.
  */
 
@@ -130,7 +130,7 @@ std::vector<std::string> BatchNorm(const CallNode* call) {
   return args;
 }
 
-// should comply with src/runtime/contrib/dnnl/dnnl.cc
+// should comply with src/runtime/contrib/zendnn/zendnn.cc
 #define ZENDNN_BINARY_ADD 0
 #define ZENDNN_BINARY_MUL 1
 
@@ -190,7 +190,7 @@ class CodegenZENDNN : public MemoizedExprTranslator<std::vector<Output>>, public
 
   std::vector<Output> VisitExpr_(const ConstantNode* cn) final {
     Output output;
-    // Get const: static_cast<float*>(dnnl_0_consts[0]->data)
+    // Get const: static_cast<float*>(zendnn_0_consts[0]->data)
     output.name = CreateDataReference(ext_func_id_, const_idx_);
     output.dtype = "float";
 
@@ -249,9 +249,9 @@ class CodegenZENDNN : public MemoizedExprTranslator<std::vector<Output>>, public
 
     using ArgFunType = std::function<std::vector<std::string>(const CallNode*)>;
     static const std::map<std::string, std::pair<std::string, ArgFunType>> op_map = {
-        {"nn.conv2d", {"dnnl_conv2d", Conv2d}}, {"nn.dense", {"dnnl_dense", Dense}},
-        {"nn.relu", {"dnnl_relu", Relu}},       {"nn.batch_norm", {"dnnl_bn", BatchNorm}},
-        {"add", {"dnnl_binary_op", Add}},       {"multiply", {"dnnl_binary_op", Multiply}},
+        {"nn.conv2d", {"zendnn_conv2d", Conv2d}}, {"nn.dense", {"zendnn_dense", Dense}},
+        {"nn.relu", {"zendnn_relu", Relu}},       {"nn.batch_norm", {"zendnn_bn", BatchNorm}},
+        {"add", {"zendnn_binary_op", Add}},       {"multiply", {"zendnn_binary_op", Multiply}},
     };
 
     const auto op_name = GetRef<Op>(op_node)->name;
@@ -268,14 +268,14 @@ class CodegenZENDNN : public MemoizedExprTranslator<std::vector<Output>>, public
     const auto pattern_name = callee->GetAttr<runtime::String>(attr::kComposite);
     ICHECK(pattern_name.defined()) << "Only functions with composite attribute supported";
 
-    if (pattern_name == "dnnl.conv2d_bias_relu") {
+    if (pattern_name == "zendnn.conv2d_bias_relu") {
       const auto* conv_call =
           GetRootCall(callee->body.as<CallNode>(), 2, {"nn.conv2d", "add", "nn.relu"});
-      return GenerateBody(conv_call, "dnnl_fused_conv2d_bias_relu", GetArgumentNames(caller),
+      return GenerateBody(conv_call, "zendnn_fused_conv2d_bias_relu", GetArgumentNames(caller),
                           Conv2d(conv_call));
-    } else if (pattern_name == "dnnl.conv2d_relu") {
+    } else if (pattern_name == "zendnn.conv2d_relu") {
       const auto* conv_call = GetRootCall(callee->body.as<CallNode>(), 1, {"nn.conv2d", "nn.relu"});
-      return GenerateBody(conv_call, "dnnl_fused_conv2d_relu", GetArgumentNames(caller),
+      return GenerateBody(conv_call, "zendnn_fused_conv2d_relu", GetArgumentNames(caller),
                           Conv2d(conv_call));
     }
 
@@ -339,7 +339,7 @@ class CodegenZENDNN : public MemoizedExprTranslator<std::vector<Output>>, public
     return ret;
   }
 
-  /*! \brief The id of the external dnnl ext_func. */
+  /*! \brief The id of the external zendnn ext_func. */
   std::string ext_func_id_{""};
   /*!
    * \brief The index to track the output buffer. Each kernel will redirect the
@@ -386,9 +386,9 @@ class ZENDNNModuleCodegen : public CSourceModuleCodegenBase {
   /*!
    * \brief The overridden function that will create a CSourceModule. In order
    * to compile the generated C source code, users need to specify the paths to
-   * some libraries, including some TVM required and dnnl specific ones. To make
+   * some libraries, including some TVM required and zendnn specific ones. To make
    * linking simpiler, the ZENDNN kernels are wrapped in a TVM compatible manner
-   * and live under tvm/src/runtime/contrib/dnnl folder.
+   * and live under tvm/src/runtime/contrib/zendnn folder.
    *
    * \param ref An object ref that could be either a Relay function or module.
    *
@@ -403,10 +403,10 @@ class ZENDNNModuleCodegen : public CSourceModuleCodegenBase {
     code_stream_ << "#include <tvm/runtime/c_runtime_api.h>\n";
     code_stream_ << "#include <tvm/runtime/packed_func.h>\n";
     code_stream_ << "#include <dlpack/dlpack.h>\n";
-    // dnnl_kernel file is saved under src/runtime/contrib/dnnl so that we don't
+    // zendnn_kernel file is saved under src/runtime/contrib/zendnn so that we don't
     // expose it to ordinary users. To make export_library use it, users need to
     // pass -I${PATH_TO_TVM}/src/runtime/contrib
-    code_stream_ << "#include <dnnl/dnnl_kernel.h>\n";
+    code_stream_ << "#include <zendnn/zendnn_kernel.h>\n";
     code_stream_ << "using namespace tvm::runtime;\n";
     code_stream_ << "using namespace tvm::runtime::contrib;\n";
     code_stream_ << "\n";
@@ -464,7 +464,7 @@ class ZENDNNJSONSerializer : public backend::contrib::JSONSerializer {
 
  public:
   ZENDNNJSONSerializer(const std::string& symbol, const Expr& expr)
-      : JSONSerializer("dnnl_" + symbol, expr) {}
+      : JSONSerializer("zendnn_" + symbol, expr) {}
 
   std::vector<JSONGraphNodeEntry> VisitExpr_(const CallNode* cn) override {
     Expr expr = GetRef<Expr>(cn);
@@ -481,26 +481,26 @@ class ZENDNNJSONSerializer : public backend::contrib::JSONSerializer {
       ICHECK(comp.defined()) << "ZENDNN JSON runtime only supports composite functions.";
       name = comp.value();
 
-      if (name.find("dnnl.deconv2d") != std::string::npos) {
+      if (name.find("zendnn.deconv2d") != std::string::npos) {
         call = GetRootCall(fn->body.as<CallNode>(), 10, "nn.conv2d_transpose");
         ICHECK(call->op.as<OpNode>()) << "Not op node";
-      } else if (name.find("dnnl.deconv3d") != std::string::npos) {
+      } else if (name.find("zendnn.deconv3d") != std::string::npos) {
         call = GetRootCall(fn->body.as<CallNode>(), 10, "nn.conv3d_transpose");
         ICHECK(call->op.as<OpNode>()) << "Not op node";
-      } else if (name.find("dnnl.conv1d") != std::string::npos) {
+      } else if (name.find("zendnn.conv1d") != std::string::npos) {
         call = GetRootCall(fn->body.as<CallNode>(), 10, "nn.conv1d");
         ICHECK(call->op.as<OpNode>()) << "Not op node";
-      } else if (name.find("dnnl.conv2d") != std::string::npos) {
+      } else if (name.find("zendnn.conv2d") != std::string::npos) {
         call = GetRootCall(fn->body.as<CallNode>(), 10, "nn.conv2d");
         ICHECK(call->op.as<OpNode>()) << "Not op node";
-      } else if (name.find("dnnl.conv3d") != std::string::npos) {
+      } else if (name.find("zendnn.conv3d") != std::string::npos) {
         call = GetRootCall(fn->body.as<CallNode>(), 10, "nn.conv3d");
         ICHECK(call->op.as<OpNode>()) << "Not op node";
-      } else if (name.find("dnnl.dense") != std::string::npos) {
+      } else if (name.find("zendnn.dense") != std::string::npos) {
         call = GetRootCall(fn->body.as<CallNode>(), 10, "nn.dense");
         ICHECK(call->op.as<OpNode>()) << "Not op node";
-      } else if (name.find("dnnl.qnn.conv2d") != std::string::npos ||
-                 name.find("dnnl.qnn.dense") != std::string::npos) {
+      } else if (name.find("zendnn.qnn.conv2d") != std::string::npos ||
+                 name.find("zendnn.qnn.dense") != std::string::npos) {
         std::vector<Expr> args_loc;
         //call = ParseComposite(*fn, &extra_attrs, &args_loc);
         //args = BindToCallNodeArgs(args_loc, cn);
@@ -564,8 +564,8 @@ runtime::Module ZENDNNCompiler(const ObjectRef& ref) {
   auto mod = (*pf)(func_name, graph_json, serializer.const_names());
   return mod;
 #else
-  ZENDNNModuleCodegen dnnl;
-  return dnnl.CreateCSourceModule(ref);
+  ZENDNNModuleCodegen zendnn;
+  return zendnn.CreateCSourceModule(ref);
 #endif
 }
 
@@ -582,7 +582,7 @@ struct ZENDNNConstantUpdater : public ConstantUpdater {
  public:
   ZENDNNConstantUpdater(const std::string& symbol,
                       std::unordered_map<std::string, runtime::NDArray>* params)
-      : ConstantUpdater("dnnl_" + symbol, params) {}
+      : ConstantUpdater("zendnn_" + symbol, params) {}
   using ConstantUpdater::VisitExpr_;
 
   void VisitExpr_(const CallNode* cn) final {
@@ -591,14 +591,16 @@ struct ZENDNNConstantUpdater : public ConstantUpdater {
     if (const auto* fn = cn->op.as<FunctionNode>()) {
       std::vector<Expr> args_loc;
       std::unordered_map<std::string, dmlc::any> attrs;
-      //auto root_cn = ParseComposite(*fn, &attrs, &args_loc);
+			/*
+      auto root_cn = ParseComposite(*fn, &attrs, &args_loc);
 
-      //auto args = root_cn ? BindToCallNodeArgs(args_loc, cn) : cn->args;
+      auto args = root_cn ? BindToCallNodeArgs(args_loc, cn) : cn->args;
 
       // Customized visit order of args
-      //for (const auto& arg : args) {
-      //  this->VisitExpr(arg);
-      //}
+      for (const auto& arg : args) {
+        this->VisitExpr(arg);
+      }
+			*/
     } else {
       // Original visit order of args
       for (auto arg : cn->args) {
