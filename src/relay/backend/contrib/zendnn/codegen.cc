@@ -624,7 +624,7 @@ Map<String, runtime::NDArray> ZENDNNConstantUpdaterFunc(Expr expr, std::string s
   return ret;
 }
 
-TVM_REGISTER_GLOBAL("relay.ext.dnnl.constant_updater").set_body_typed(ZENDNNConstantUpdaterFunc);
+TVM_REGISTER_GLOBAL("relay.ext.zendnn.constant_updater").set_body_typed(ZENDNNConstantUpdaterFunc);
 
 }  // namespace contrib
 }  // namespace relay
