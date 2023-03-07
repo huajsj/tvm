@@ -8,11 +8,12 @@ net=relay.add(data, const)
 f=relay.Function(relay.analysis.free_vars(net),net)
 m, p=testing.create_workload(f)
 
-@tvm.ir.register_op_attr("add", "target.zendnn")
+byoc = "zendnn"
+@tvm.ir.register_op_attr("add", "target."+byoc)
 def _support(attr):
     return True
 
-pm=relay.transform.AnnotateTarget("zendnn")(m)
+pm=relay.transform.AnnotateTarget(byoc)(m)
 mod=relay.transform.PartitionGraph()(pm)
 
 lib=relay.build(mod, "llvm")

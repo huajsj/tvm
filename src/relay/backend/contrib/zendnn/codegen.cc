@@ -35,9 +35,9 @@
 #include <sstream>
 
 #include "../../utils.h"
-//#include "comp_op_matcher.h"
+#include "comp_op_matcher.h"
 
-#ifdef USE_JSON_RUNTIME
+#ifdef ZEN_USE_JSON_RUNTIME
 #include "../../../../runtime/contrib/json/json_node.h"
 #include "../codegen_json/codegen_json.h"
 #else
@@ -50,7 +50,23 @@ namespace contrib {
 
 using namespace backend;
 
-#ifndef USE_JSON_RUNTIME  // C source runtime
+#ifndef ZEN_USE_JSON_RUNTIME  // C source runtime
+static tvm::Array<Expr> BindToCallNodeArgs(const std::vector<Expr>& args, const CallNode* cn) {
+  tvm::Array<Expr> res;
+  for (const auto& arg : args) {
+    if (arg->IsInstance<ConstantNode>()) {
+      res.push_back(arg);
+    } else {
+      auto body_params = cn->op.as<FunctionNode>()->params;
+      auto found = std::find(body_params.begin(), body_params.end(), arg);
+      ICHECK(found != body_params.end());
+      auto idx = std::distance(body_params.begin(), found);
+      res.push_back(cn->args[idx]);
+    }
+  }
+  return res;
+}
+
 inline size_t GetShape1DSize(const Type& type) {
   const auto shape = GetShape(type);
   return std::accumulate(shape.begin(), shape.end(), 1, std::multiplies<int>());
@@ -65,7 +81,7 @@ inline std::string GetShapeString(std::vector<int> shape) {
   return v;
 }
 
-std::vector<std::string> Conv2d(const CallNode* call) {
+std::vector<std::string> Conv2dZ(const CallNode* call) {
   std::vector<std::string> args;
   const auto* conv2d_attr = call->attrs.as<Conv2DAttrs>();
   ICHECK(conv2d_attr);
@@ -93,7 +109,7 @@ std::vector<std::string> Conv2d(const CallNode* call) {
   return args;
 }
 
-std::vector<std::string> Dense(const CallNode* call) {
+std::vector<std::string> DenseZ(const CallNode* call) {
   std::vector<std::string> args;
   auto ishape = GetShape(call->args[0]->checked_type());
   auto wshape = GetShape(call->args[1]->checked_type());
@@ -106,7 +122,7 @@ std::vector<std::string> Dense(const CallNode* call) {
   return args;
 }
 
-std::vector<std::string> Relu(const CallNode* call) {
+std::vector<std::string> ReluZ(const CallNode* call) {
   std::vector<std::string> args;
   auto ishape = GetShape(call->args[0]->checked_type());
   // Args: N, C, H, W
@@ -114,7 +130,7 @@ std::vector<std::string> Relu(const CallNode* call) {
   return args;
 }
 
-std::vector<std::string> BatchNorm(const CallNode* call) {
+std::vector<std::string> BatchNormZ(const CallNode* call) {
   std::vector<std::string> args;
   const auto* bn_attr = call->attrs.as<BatchNormAttrs>();
   auto ishape = GetShape(call->args[0]->checked_type());
@@ -134,7 +150,7 @@ std::vector<std::string> BatchNorm(const CallNode* call) {
 #define ZENDNN_BINARY_ADD 0
 #define ZENDNN_BINARY_MUL 1
 
-std::vector<std::string> Add(const CallNode* call) {
+std::vector<std::string> AddZ(const CallNode* call) {
   std::vector<std::string> args;
   auto ishape = GetShape(call->args[0]->checked_type());
   args.push_back(std::to_string(ZENDNN_BINARY_ADD));
@@ -143,7 +159,7 @@ std::vector<std::string> Add(const CallNode* call) {
   return args;
 }
 
-std::vector<std::string> Multiply(const CallNode* call) {
+std::vector<std::string> MultiplyZ(const CallNode* call) {
   std::vector<std::string> args;
   auto ishape = GetShape(call->args[0]->checked_type());
   args.push_back(std::to_string(ZENDNN_BINARY_MUL));
@@ -249,9 +265,9 @@ class CodegenZENDNN : public MemoizedExprTranslator<std::vector<Output>>, public
 
     using ArgFunType = std::function<std::vector<std::string>(const CallNode*)>;
     static const std::map<std::string, std::pair<std::string, ArgFunType>> op_map = {
-        {"nn.conv2d", {"zendnn_conv2d", Conv2d}}, {"nn.dense", {"zendnn_dense", Dense}},
-        {"nn.relu", {"zendnn_relu", Relu}},       {"nn.batch_norm", {"zendnn_bn", BatchNorm}},
-        {"add", {"zendnn_binary_op", Add}},       {"multiply", {"zendnn_binary_op", Multiply}},
+        {"nn.conv2d", {"zendnn_conv2d", Conv2dZ}}, {"nn.dense", {"zendnn_dense", DenseZ}},
+        {"nn.relu", {"zendnn_relu", ReluZ}},       {"nn.batch_norm", {"zendnn_bn", BatchNormZ}},
+        {"add", {"zendnn_binary_op", AddZ}},       {"multiply", {"zendnn_binary_op", MultiplyZ}},
     };
 
     const auto op_name = GetRef<Op>(op_node)->name;
@@ -272,11 +288,11 @@ class CodegenZENDNN : public MemoizedExprTranslator<std::vector<Output>>, public
       const auto* conv_call =
           GetRootCall(callee->body.as<CallNode>(), 2, {"nn.conv2d", "add", "nn.relu"});
       return GenerateBody(conv_call, "zendnn_fused_conv2d_bias_relu", GetArgumentNames(caller),
-                          Conv2d(conv_call));
+                          Conv2dZ(conv_call));
     } else if (pattern_name == "zendnn.conv2d_relu") {
-      const auto* conv_call = GetRootCall(callee->body.as<CallNode>(), 1, {"nn.conv2d", "nn.relu"});
-      return GenerateBody(conv_call, "zendnn_fused_conv2d_relu", GetArgumentNames(caller),
-                          Conv2d(conv_call));
+      //const auto* conv_call = GetRootCall(callee->body.as<CallNode>(), 1, {"nn.conv2d", "nn.relu"});
+      //return GenerateBody(conv_call, "zendnn_fused_conv2d_relu", GetArgumentNames(caller),
+        //                  Conv2dZ(conv_call));
     }
 
     LOG(FATAL) << "Unknown composite function:" << pattern_name;
@@ -415,8 +431,11 @@ class ZENDNNModuleCodegen : public CSourceModuleCodegenBase {
     auto res = GenZENDNNFunc(Downcast<Function>(ref));
     std::string code = code_stream_.str();
     String sym = std::get<0>(res);
+		std::cout << "sym is " << sym << std::endl;
     Array<String> variables = std::get<1>(res);
-
+		for (auto var:variables) {
+			std::cout << var << std::endl;
+		}
     // Create a CSource module
     const auto* pf = runtime::Registry::Get("runtime.CSourceModuleCreate");
     ICHECK(pf != nullptr) << "Cannot find csource module to create the external runtime module";
@@ -502,15 +521,15 @@ class ZENDNNJSONSerializer : public backend::contrib::JSONSerializer {
       } else if (name.find("zendnn.qnn.conv2d") != std::string::npos ||
                  name.find("zendnn.qnn.dense") != std::string::npos) {
         std::vector<Expr> args_loc;
-        //call = ParseComposite(*fn, &extra_attrs, &args_loc);
-        //args = BindToCallNodeArgs(args_loc, cn);
+        call = ZenParseComposite(*fn, &extra_attrs, &args_loc);
+        args = BindToCallNodeArgs(args_loc, cn);
       } else {
         LOG(FATAL) << "Unrecognized ZENDNN pattern: " << name;
       }
 
-      //if (args.empty()) {
-      //  args = cn->args;
-     // }
+      if (args.empty()) {
+        args = cn->args;
+      }
     } else {
       LOG(FATAL) << "ZENDNN JSON runtime does not support calls to " << cn->op->GetTypeKey();
     }
@@ -546,10 +565,11 @@ class ZENDNNJSONSerializer : public backend::contrib::JSONSerializer {
  * compile it into a runtime module.
  */
 runtime::Module ZENDNNCompiler(const ObjectRef& ref) {
-#ifdef USE_JSON_RUNTIME
+#ifdef ZEN_USE_JSON_RUNTIME
   ICHECK(ref->IsInstance<FunctionNode>());
   auto func = Downcast<Function>(ref);
   auto func_name = GetExtSymbol(func);
+	std::cout<< "function name is " <<  func_name <<std::endl;
   ZENDNNJSONSerializer serializer(func_name, func);
   serializer.serialize();
   std::string graph_json = serializer.GetJSON();
@@ -565,6 +585,7 @@ runtime::Module ZENDNNCompiler(const ObjectRef& ref) {
   return mod;
 #else
   ZENDNNModuleCodegen zendnn;
+	printf("not use json \n");
   return zendnn.CreateCSourceModule(ref);
 #endif
 }
@@ -591,8 +612,8 @@ struct ZENDNNConstantUpdater : public ConstantUpdater {
     if (const auto* fn = cn->op.as<FunctionNode>()) {
       std::vector<Expr> args_loc;
       std::unordered_map<std::string, dmlc::any> attrs;
-			/*
-      auto root_cn = ParseComposite(*fn, &attrs, &args_loc);
+			///*
+      auto root_cn = ZenParseComposite(*fn, &attrs, &args_loc);
 
       auto args = root_cn ? BindToCallNodeArgs(args_loc, cn) : cn->args;
 
@@ -600,7 +621,7 @@ struct ZENDNNConstantUpdater : public ConstantUpdater {
       for (const auto& arg : args) {
         this->VisitExpr(arg);
       }
-			*/
+			//*/
     } else {
       // Original visit order of args
       for (auto arg : cn->args) {
@@ -622,7 +643,10 @@ Map<String, runtime::NDArray> ZENDNNConstantUpdaterFunc(Expr expr, std::string s
 
   // Convert to tvm::Map
   Map<String, runtime::NDArray> ret;
-  for (const auto& kvp : res) ret.Set(kvp.first, kvp.second);
+  for (const auto& kvp : res) {
+		std::cout << kvp.first << std::endl;
+		ret.Set(kvp.first, kvp.second);
+	}
   return ret;
 }
 
