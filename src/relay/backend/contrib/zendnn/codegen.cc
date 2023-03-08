@@ -219,7 +219,9 @@ class CodegenZENDNN : public MemoizedExprTranslator<std::vector<Output>>, public
 
     // Give the ndarray a unique name to ease the initialization of it at
     // runtime.
-    std::string const_var_name = CreateConstVar(ext_func_id_, const_idx_);
+		std::string symbol = "zendnn_" + ext_func_id_;
+    std::string const_var_name = CreateConstVar(symbol, const_idx_);
+		std::cout << "const_var_name is: " << const_var_name << std::endl;
     const_vars_.push_back(const_var_name);
     const_idx_++;
 
@@ -534,16 +536,13 @@ class ZENDNNJSONSerializer : public backend::contrib::JSONSerializer {
       LOG(FATAL) << "ZENDNN JSON runtime does not support calls to " << cn->op->GetTypeKey();
     }
     std::vector<JSONGraphNodeEntry> inputs;
-		/*
     for (const auto& arg : args) {
       auto res = VisitExpr(arg);
       inputs.insert(inputs.end(), res.begin(), res.end());
     }
-		*/
     auto node = std::make_shared<JSONGraphNode>(name,     // aname_ 
                                                 "kernel", // op_type_ 
                                                 inputs, 1 );// num_outputs_ );
-		/*
     SetCallNodeAttribute(node, call);
     // If has post-op `clip`. Assume the last op is clip, add clip's attrs to the pattern attrs.
     if (name.find("_clip") != std::string::npos) {
@@ -551,9 +550,8 @@ class ZENDNNJSONSerializer : public backend::contrib::JSONSerializer {
       ICHECK(IsOp(clip_call, "clip"));
       SetCallNodeAttribute(node, clip_call);
     }
-		*/
     // For QNN.
-    //for (const auto& kvp : extra_attrs) node->SetAttr(kvp.first, kvp.second);
+    for (const auto& kvp : extra_attrs) node->SetAttr(kvp.first, kvp.second);
 
     return AddNode(node, GetRef<Expr>(cn));
   }
