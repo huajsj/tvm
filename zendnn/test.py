@@ -1,4 +1,4 @@
-import tvm
+import tvm,os
 from tvm import relay
 from tvm.relay import testing
 
@@ -17,3 +17,7 @@ pm=relay.transform.AnnotateTarget(byoc)(m)
 mod=relay.transform.PartitionGraph()(pm)
 
 lib=relay.build(mod, "llvm")
+
+for m in lib.lib.imported_modules:
+    print(m.get_source())
+
