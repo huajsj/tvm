@@ -1,0 +1,2 @@
+ccache g++ -DLIBM_ENABLE=1 -std=c++14 -O3 -fPIC -fopenmp -DBIAS_ENABLED=1 -DZENDNN_ENABLE=1 -Werror -Wreturn-type -fconcepts -DZENDNN_X64=1 -march=znver2 -o ./test -I../inc -I/scratch/staff/huaj/tvm/zendnn/ZenDNN/aocl-linux-gcc-4.0/amd-blis//include -I/scratch/staff/huaj/tvm/zendnn/ZenDNN/aocl-linux-gcc-4.0/amd-libm//include -I./ test.cpp -L../_out/lib -lamdZenDNN -L/scratch/staff/huaj/tvm/zendnn/ZenDNN/aocl-linux-gcc-4.0/amd-blis//lib/ -lblis-mt -L/scratch/staff/huaj/tvm/zendnn/ZenDNN/aocl-linux-gcc-4.0/amd-libm//lib -lalm
+
