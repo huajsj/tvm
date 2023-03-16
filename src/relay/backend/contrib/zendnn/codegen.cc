@@ -51,6 +51,12 @@ namespace contrib {
 using namespace backend;
 
 #ifndef ZEN_USE_JSON_RUNTIME  // C source runtime
+/*
+extern "C" void zendnn_binary_op(float* data, float* weight, float* out, int algo_type,
+		                               std::vector<int64_t> shape) {
+	std::cout<< "test" <<std::endl;
+}
+*/
 static tvm::Array<Expr> BindToCallNodeArgs(const std::vector<Expr>& args, const CallNode* cn) {
   tvm::Array<Expr> res;
   for (const auto& arg : args) {
