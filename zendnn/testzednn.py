@@ -5,7 +5,7 @@ from tvm.contrib import utils as util
 from tvm.contrib import graph_runtime
 import numpy as np
 
-data=relay.var("data", relay.TensorType((1,1), "float32"))
+data=relay.var("data", relay.TensorType((2,2), "float32"))
 const=relay.const(1, "float32")
 net=relay.add(data, const)
 f=relay.Function(relay.analysis.free_vars(net),net)
@@ -59,7 +59,7 @@ def update_lib(lib):
 lib = update_lib(lib)
 mod = graph_runtime.create(graph, lib, tvm.cpu(0))
 
-idata =np.full((1,1),1.0, "float32")
+idata =np.full((2,2),1.0, "float32")
 mod.set_input("data", idata)
 mod.set_input(**params)
 mod.run()

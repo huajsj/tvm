@@ -43,8 +43,8 @@ using namespace zendnn;
 typedef struct {
   void** data;
 } DnnlPackedArgs;
-/*
-inline zendnn::memory::desc GenDNNLMemDescByShape(const zendnn::memory::dims& shape,
+///*
+inline zendnn::memory::desc GenZENDNNMemDescByShape(const zendnn::memory::dims& shape,
                                                 memory::data_type dtype) {
   using tag = memory::format_tag;
 
@@ -64,12 +64,11 @@ inline zendnn::memory::desc GenDNNLMemDescByShape(const zendnn::memory::dims& sh
       data_md = zendnn::memory::desc({shape, dtype, tag::abcde});
       break;
     default:
-      LOG(FATAL) << "Unsupported data shape dimension: " << shape.size();
+			std::cout << "Unsupported data shape dimension: " << shape.size() << std::endl;
       break;
   }
   return data_md;
 }
-
 // Read from memory, write to handle
 inline void read_from_zendnn_memory(void* handle, const memory& mem) {
   size_t bytes = mem.get_desc().get_size();
@@ -77,7 +76,7 @@ inline void read_from_zendnn_memory(void* handle, const memory& mem) {
   uint8_t* src = static_cast<uint8_t*>(mem.get_data_handle());
   std::copy(src, src + bytes, reinterpret_cast<uint8_t*>(handle));
 }
-
+/*
 void zendnn_conv2d_common(float* data, float* weights, float* bias, float* out, int p_N_, int p_C_,
                         int p_H_, int p_W_, int p_O_, int p_G_, int p_Ph0_, int p_Pw0_, int p_Ph1_,
                         int p_Pw1_, int p_Kh_, int p_Kw_, int p_Sh_, int p_Sw_, primitive_attr attr,
@@ -316,9 +315,9 @@ extern "C" void zendnn_binary_op(float* data, float* weight, float* out, int alg
 
   engine eng(engine::kind::cpu, 0);
   stream s(eng);
-	/*
-  auto data_md = GenDNNLMemDescByShape(shape, dt::f32);
-
+	std::cout << "zendnn_binary_op" << std::endl;
+	for(auto s:shape) std::cout << "shape is:" << s << std::endl;
+  auto data_md = GenZENDNNMemDescByShape(shape, dt::f32);
   auto data_memory = memory(data_md, eng, data);
   auto weight_memory = memory(data_md, eng, weight);
   auto dst_memory = memory(data_md, eng);
@@ -332,7 +331,7 @@ extern "C" void zendnn_binary_op(float* data, float* weight, float* out, int alg
       algo = algorithm::binary_mul;
       break;
     default:
-      LOG(FATAL) << "Unsupported zendnn algorithm: " << algo_type;
+			std::cout << "Unsupported zendnn algorithm: " << algo_type << std::endl;
       break;
   }
 
@@ -343,10 +342,9 @@ extern "C" void zendnn_binary_op(float* data, float* weight, float* out, int alg
   auto add = binary(add_prim_desc);
   add.execute(
       s,
-      {{DNNL_ARG_SRC_0, data_memory}, {DNNL_ARG_SRC_1, weight_memory}, {DNNL_ARG_DST, dst_memory}});
+      {{ZENDNN_ARG_SRC, data_memory}, {ZENDNN_ARG_SRC_1, weight_memory}, {ZENDNN_ARG_DST, dst_memory}});
   s.wait();
   read_from_zendnn_memory(out, dst_memory);
-	*/
 }
 /*
 // DNNL Conv2d single OP
