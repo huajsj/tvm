@@ -205,42 +205,6 @@ extern "C" void zendnn_fused_conv2d_bias_relu(float* data, float* weights, float
                             create_attr_with_relu_post_op(), false, true, true);
 }
 
-extern "C" void zendnn_dense(float* data, float* weight, float* out, int p_B_, int p_I_, int p_O_) {
-  using tag = memory::format_tag;
-  using dt = memory::data_type;
-
-  engine eng(engine::kind::cpu, 0);
-  stream s(eng);
-
-  memory::dims data_tz = {p_B_, p_I_};
-  memory::dims weight_tz = {p_O_, p_I_};
-  memory::dims bias_tz = {p_O_};
-  memory::dims dst_tz = {p_B_, p_O_};
-
-  auto data_md = memory::desc{{data_tz}, dt::f32, tag::nc};
-  auto weight_md = memory::desc({{weight_tz}, dt::f32, tag::nc});
-  auto bias_md = memory::desc({{bias_tz}, dt::f32, tag::x});
-  auto dst_md = memory::desc({{dst_tz}, dt::f32, tag::nc});
-
-  std::vector<float> bias(p_O_, 0);
-  auto data_memory = memory(data_md, eng, data);
-  auto weight_memory = memory(weight_md, eng, weight);
-  auto bias_memory = memory(bias_md, eng, bias.data());
-  auto dst_memory = memory(dst_md, eng);
-
-  auto dense_desc = inner_product_forward::desc(prop_kind::forward_inference, data_md, weight_md,
-                                                bias_md, dst_md);
-  auto dense_prim_desc = inner_product_forward::primitive_desc(dense_desc, eng);
-  assert(dst_md == dense_prim_desc.dst_desc());
-
-  auto dense = inner_product_forward(dense_prim_desc);
-  dense.execute(s, {{DNNL_ARG_SRC, data_memory},
-                    {DNNL_ARG_WEIGHTS, weight_memory},
-                    {DNNL_ARG_BIAS, bias_memory},
-                    {DNNL_ARG_DST, dst_memory}});
-  s.wait();
-  read_from_zendnn_memory(out, dst_memory);
-}
 
 extern "C" void zendnn_relu(float* data, float* out, std::vector<int64_t> shape) {
   using dt = memory::data_type;
@@ -308,6 +272,44 @@ extern "C" void zendnn_bn(float* data, float* gamma, float* beta, float* mean, f
 // should comply with src/relay/backend/contrib/zendnn/codegen.cc
 #define DNNL_BINARY_ADD 0
 #define DNNL_BINARY_MUL 1
+
+extern "C" void zendnn_dense(float* data, float* weight, float* out, int p_B_, int p_I_, int p_O_) {
+	std::cout << "zendnn_dense----" << std::endl;
+  using tag = memory::format_tag;
+  using dt = memory::data_type;
+
+  engine eng(engine::kind::cpu, 0);
+  stream s(eng);
+
+  memory::dims data_tz = {p_B_, p_I_};
+  memory::dims weight_tz = {p_O_, p_I_};
+  memory::dims bias_tz = {p_O_};
+  memory::dims dst_tz = {p_B_, p_O_};
+
+  auto data_md = memory::desc{{data_tz}, dt::f32, tag::nc};
+  auto weight_md = memory::desc({{weight_tz}, dt::f32, tag::nc});
+  auto bias_md = memory::desc({{bias_tz}, dt::f32, tag::x});
+  auto dst_md = memory::desc({{dst_tz}, dt::f32, tag::nc});
+
+  std::vector<float> bias(p_O_, 0);
+  auto data_memory = memory(data_md, eng, data);
+  auto weight_memory = memory(weight_md, eng, weight);
+  auto bias_memory = memory(bias_md, eng, bias.data());
+  auto dst_memory = memory(dst_md, eng);
+
+  auto dense_desc = inner_product_forward::desc(prop_kind::forward_inference, data_md, weight_md,
+                                                bias_md, dst_md);
+  auto dense_prim_desc = inner_product_forward::primitive_desc(dense_desc, eng);
+  assert(dst_md == dense_prim_desc.dst_desc());
+
+  auto dense = inner_product_forward(dense_prim_desc);
+  dense.execute(s, {{ZENDNN_ARG_SRC, data_memory},
+                    {ZENDNN_ARG_WEIGHTS, weight_memory},
+                    {ZENDNN_ARG_BIAS, bias_memory},
+                    {ZENDNN_ARG_DST, dst_memory}});
+  s.wait();
+  read_from_zendnn_memory(out, dst_memory);
+}
 
 extern "C" void zendnn_binary_op(float* data, float* weight, float* out, int algo_type,
                                std::vector<int64_t> shape) {

@@ -27,11 +27,9 @@ byoc = "zendnn"
 def _support(attr):
     return True
 
-'''
 @tvm.ir.register_op_attr("nn.dense", "target."+byoc)
 def _support(attr):
     return True
-'''
 
 pm=relay.transform.AnnotateTarget(byoc)(m)
 mod=relay.transform.PartitionGraph()(pm)
