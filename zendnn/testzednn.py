@@ -5,9 +5,20 @@ from tvm.contrib import utils as util
 from tvm.contrib import graph_runtime
 import numpy as np
 
-data=relay.var("data", relay.TensorType((2,2), "float32"))
-const=relay.const(1, "float32")
+batch = 2
+idim = 10
+odim = 20
+dshape=(batch,idim)
+wshape=(idim, odim)
+bshape=(odim,)
+const_data=np.full(dshape,1.0,"float32")
+data=relay.var("data", relay.TensorType(dshape, "float32"))
+weight=relay.var("weight", relay.TensorType(wshape, "float32"))
+bias=relay.var("bias", relay.TensorType(bshape, "float32"))
+
+const=relay.const(const_data, "float32")
 net=relay.add(data, const)
+net=relay.nn.dense(net,weight)
 f=relay.Function(relay.analysis.free_vars(net),net)
 m, p=testing.create_workload(f)
 
@@ -15,6 +26,12 @@ byoc = "zendnn"
 @tvm.ir.register_op_attr("add", "target."+byoc)
 def _support(attr):
     return True
+
+'''
+@tvm.ir.register_op_attr("nn.dense", "target."+byoc)
+def _support(attr):
+    return True
+'''
 
 pm=relay.transform.AnnotateTarget(byoc)(m)
 mod=relay.transform.PartitionGraph()(pm)
@@ -59,8 +76,10 @@ def update_lib(lib):
 lib = update_lib(lib)
 mod = graph_runtime.create(graph, lib, tvm.cpu(0))
 
-idata =np.full((2,2),1.0, "float32")
+idata =np.full(dshape,1.0, "float32")
+wdata =np.full(wshape,2.0, "float32")
 mod.set_input("data", idata)
+mod.set_input("weight", wdata)
 mod.set_input(**params)
 mod.run()
 out=mod.get_output(0)
