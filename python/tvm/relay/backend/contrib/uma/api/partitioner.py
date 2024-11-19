@@ -31,9 +31,13 @@ PatternTable = List[Tuple[str, tvm.relay.dataflow_pattern.DFPattern, Callable]]
 class UMAPartitioner:
     """Partitioner base class of the Universal Modular Accelerator Interface (UMA)."""
 
-    def __init__(self, target_name: str, merge_compiler_regions: bool = True) -> None:
+    def __init__(self,
+                 target_name: str,
+                 merge_compiler_regions: bool = True,
+                 bind_constants: bool = True) -> None:
         self.target_name = target_name
         self.merge_compiler_regions = merge_compiler_regions
+        self.bind_constants = bind_constants
 
         self._relay_passes: List[Tuple[PassPhase, tvm.transform.Pass]] = []
         self._patterns: PatternTable = []
@@ -102,7 +106,9 @@ class UMAPartitioner:
         pass_sequence.append(relay.transform.AnnotateTarget(self.target_name))
         if self.merge_compiler_regions:
             pass_sequence.append(relay.transform.MergeCompilerRegions())
-        pass_sequence.append(relay.transform.PartitionGraph())
+        pass_sequence.append(
+                relay.transform.PartitionGraph(bind_constants=self.bind_constants)
+        )
         pass_sequence.extend(
             [p[1] for p in self._relay_passes if p[0] == PassPhase.POST_PARTITIONING_0]
         )
