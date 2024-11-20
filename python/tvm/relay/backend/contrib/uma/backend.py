@@ -30,10 +30,12 @@ from tvm.relay.backend.contrib.uma.api.utils import PassPhase
 class UMABackend(ABC):
     """Backend base class of the Universal Modular Accelerator Interface (UMA)"""
 
-    def __init__(self, merge_compiler_regions: bool = True) -> None:
+    def __init__(self,
+                 merge_compiler_regions: bool = True,
+                 bind_constants: bool = True) -> None:
         self._target_attrs: Dict = {}
         self._target_preprocessor: Callable[[str], Dict[str, Any]] = None
-        self._relay_to_relay = UMAPartitioner(self.target_name, merge_compiler_regions)
+        self._relay_to_relay = UMAPartitioner(self.target_name, merge_compiler_regions, bind_constants)
         self._relay_to_tir = UMALower(self.target_name)
         self._tir_to_runtime = UMACodegen(self.target_name)
 

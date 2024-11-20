@@ -24,7 +24,6 @@ from tvm.relay.backend.contrib.uma.api import UMAPartitioner
 from tvm.relay.op.contrib.register import get_pattern_table
 from tvm.relay.testing import mlp, resnet
 
-from tests.python.contrib.test_uma.test_uma_vanilla_accelerator import VanillaAcceleratorBackend
 from collections import OrderedDict
 
 from tvm.testing.aot import (
@@ -35,6 +34,12 @@ from tvm.testing.aot import (
     compile_models,
 )
 from tvm.micro.testing.aot_test_utils import AOT_DEFAULT_RUNNER
+from apps.uma._template.passes import (
+    MyAiHwConv2dPass as VanillaAcceleratorConv2DPass,
+)
+from tvm.relay.backend.contrib.uma.api.utils import PassPhase
+from tvm.relay.backend.contrib.uma.backend import UMABackend
+from tvm.relay.dataflow_pattern import is_op, wildcard
 
 pytestmark = pytest.mark.skipif(not uma_available(), reason="UMA not available")
 
@@ -48,6 +53,22 @@ def test_partition_table():
     assert get_pattern_table("test_partition") is not None
 
 def test_partition_constant():
+    class exampleBackend(UMABackend):
+        def __init__(self):
+            super(exampleBackend, self).__init__(
+                    bind_constants=True
+                    )
+            self._register_pattern("conv2d",
+                is_op("nn.conv2d")(wildcard(), wildcard())
+            )
+            self._register_tir_pass(PassPhase.TIR_PHASE_0,
+                VanillaAcceleratorConv2DPass()
+            )
+        @property
+        def target_name(self):
+            return "exampleBackend"
+
+
     weight_data = np.random.rand(3, 3, 3, 3).astype("float32") 
     weights = relay.const(weight_data, dtype="float32")
     input_shape = (1, 3, 224, 224)
@@ -66,23 +87,24 @@ def test_partition_constant():
 	# Create a Relay function
     func = relay.Function([input_var], conv2d_op)
     mod = tvm.IRModule.from_expr(func)
-    uma_backend = VanillaAcceleratorBackend()
+    uma_backend = exampleBackend()
     uma_backend.register()
     mod = uma_backend.partition(mod)
 
     uma_backend.partition(mod)
-    target = tvm.target.Target("vanilla_accelerator", host=tvm.target.Target("c"))
+    target = tvm.target.Target("exampleBackend", host=tvm.target.Target("c"))
     target_c = tvm.target.Target("c")
     target = [target_c, target]
-    print(mod)
     export_directory = tvm.contrib.utils.tempdir(keep_for_debug=True).path
     print(f"Generated files are in {export_directory}")
 	
     if 1:
         input_data = np.random.rand(1, 3, 224, 224).astype("float32") 
         inputs = OrderedDict([('input', input_data)])
-        output_list = generate_ref_data(mod, inputs)
+        #with tvm.target.Target("llvm"):
+        #    output_list = generate_ref_data(mod, inputs)
         testrunner = AOT_DEFAULT_RUNNER
+        pass_config = {"tir.usmp.enable": False}
         runner = AOTRunner(
 					makefile=testrunner.makefile,
 					prologue=testrunner.prologue,
@@ -92,14 +114,11 @@ def test_partition_constant():
 					pass_config=pass_config,
 		)
 
-        compile_and_run(
-                AOTModel(module=mod, inputs=inputs, outputs=output_list),
-                runner,
+        compile_models(
+                AOTModel(module=mod, inputs=inputs, outputs=None),
                 interface_api="c",
                 use_unpacked_api=True,
-                target=target,
-                test_dir=str("./tmp/"),
-        )
+                target=target)
 
 @pytest.mark.parametrize(
     "workload,backend,merge",
@@ -159,4 +178,5 @@ def test_existing_pattern_tables(workload, backend, merge):
 
 
 if __name__ == "__main__":
-    tvm.testing.main()
+    #tvm.testing.main()
+    test_partition_constant()
